@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { QrCode, Wallet, Smartphone, ShieldCheck, Eye, EyeOff } from 'lucide-react';
+import { QrCode, Wallet, Smartphone, ShieldCheck, Lock, Eye, EyeOff } from 'lucide-react';
 import ActionModal from '../components/ActionModal';
 
 type AuthMode = 'login' | 'register' | 'forgot';
@@ -18,6 +18,15 @@ async function authApiLogin(_payload: { email: string; password: string; role: R
 }
 async function authApiRegister(_payload: Record<string, string>): Promise<void> {
   return Promise.resolve();
+}
+
+function getPasswordStrength(pw: string): number {
+  let score = 0;
+  if (pw.length >= 8) score += 1;
+  if (/[a-z]/.test(pw) && /[A-Z]/.test(pw)) score += 1;
+  if (/\d/.test(pw)) score += 1;
+  if (/[^A-Za-z0-9]/.test(pw)) score += 1;
+  return Math.min(score, 4);
 }
 
 export default function AuthPortal() {
@@ -125,12 +134,13 @@ export default function AuthPortal() {
     { id: 'operator', label: 'Bus Owner' },
   ];
 
+  const pwStrength = getPasswordStrength(password);
   const inputCls =
     'w-full min-w-0 bg-white border border-slate-200 text-slate-900 rounded-xl px-4 py-2.5 text-base shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all';
   const errCls = 'text-xs text-red-600 mt-1';
 
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 md:p-8 font-sans">
+    <div className="min-h-screen bg-white md:bg-slate-50 md:flex md:items-center md:justify-center md:p-8 font-sans">
       <ActionModal
         isOpen={modalOpen}
         onClose={() => setModalOpen(false)}
@@ -138,7 +148,29 @@ export default function AuthPortal() {
         message={modalContent.msg}
       />
 
-      <div className="w-full max-w-[1100px] bg-white rounded-[24px] shadow-2xl flex overflow-hidden border border-gray-100">
+      {/* ── MOBILE HERO HEADER (Issue #23: Figma curved blue header, mobile only) ── */}
+      <div className="md:hidden bg-blue-600 px-6 pt-8 pb-10 relative overflow-hidden">
+        <div className="absolute -top-20 -right-20 w-64 h-64 bg-blue-500 rounded-full blur-3xl opacity-50" />
+        <div className="absolute -bottom-24 -left-16 w-64 h-64 bg-blue-700 rounded-full blur-3xl opacity-50" />
+        <div className="relative z-10">
+          <div className="flex items-center gap-2.5 mb-6 cursor-pointer" onClick={() => navigate('/')}>
+            <img src="/logo.jpeg" alt="TapRide logo" className="w-10 h-10 rounded-xl shadow-sm object-cover" />
+            <span className="text-xl font-bold text-white tracking-wide">TapRide</span>
+          </div>
+          <h1 className="text-[28px] leading-tight font-bold text-white">
+            {authMode === 'login' ? 'Welcome back' : authMode === 'register' ? 'Join TapRide' : 'Reset password'}
+          </h1>
+          <p className="text-sm text-blue-100 mt-2 max-w-[280px]">
+            {authMode === 'login'
+              ? 'Sign in to manage your journeys, wallet and smart transport services.'
+              : authMode === 'register'
+                ? 'Create your account and start enjoying a smarter public transport experience.'
+                : 'We will send you reset instructions.'}
+          </p>
+        </div>
+      </div>
+
+      <div className="w-full md:max-w-[1100px] bg-white rounded-t-[32px] -mt-6 md:mt-0 relative z-10 md:rounded-[24px] shadow-2xl flex overflow-hidden md:border md:border-gray-100">
         {/* LEFT PANEL - BRANDING (Hidden on Mobile, intact on desktop) */}
         <div className="hidden md:flex w-1/2 bg-blue-600 p-12 flex-col justify-between relative overflow-hidden">
           {/* Background decorative elements */}
@@ -195,43 +227,64 @@ export default function AuthPortal() {
         </div>
 
         {/* RIGHT PANEL - FORM */}
-        <div className="w-full md:w-1/2 p-8 md:p-12 lg:p-16 flex flex-col justify-center max-h-[90vh] overflow-y-auto">
-          {/* Mobile Logo */}
-          <div className="md:hidden flex items-center gap-3 mb-8" onClick={() => navigate('/')}>
-            <img src="/logo.jpeg" alt="TapRide logo" className="w-10 h-10 rounded-xl shadow-sm object-cover" />
-            <span className="text-xl font-bold text-slate-900">TapRide</span>
+        <div className="w-full md:w-1/2 px-6 py-8 md:p-12 lg:p-16 flex flex-col justify-center md:max-h-[90vh] md:overflow-y-auto">
+          {/* Mobile Logo (kept minimal — hero above carries branding) */}
+          <div className="md:hidden flex items-center gap-3 mb-6" onClick={() => navigate('/')}>
+            <img src="/logo.jpeg" alt="TapRide logo" className="w-9 h-9 rounded-xl shadow-sm object-cover" />
+            <span className="text-lg font-bold text-slate-900">TapRide</span>
           </div>
 
-          <div className="mb-8">
-            <h2 className="text-3xl font-bold text-slate-900 mb-2">
-              {authMode === 'login' ? 'Welcome back' : authMode === 'register' ? 'Create your account' : 'Reset password'}
+          <div className="mb-6 md:mb-8">
+            <h2 className="text-2xl md:text-3xl font-bold text-slate-900 mb-2">
+              {authMode === 'login' ? (
+                <>
+                  <span className="md:hidden">Sign in</span>
+                  <span className="hidden md:inline">Welcome back</span>
+                </>
+              ) : authMode === 'register' ? (
+                <>
+                  <span className="md:hidden">Create account</span>
+                  <span className="hidden md:inline">Create your account</span>
+                </>
+              ) : (
+                'Reset password'
+              )}
             </h2>
             <p className="text-sm text-slate-500">
-              {authMode === 'login'
-                ? 'Sign in to continue to your TapRide account.'
-                : authMode === 'register'
-                  ? 'Register with TapRide to get started.'
-                  : 'Enter your email to receive reset instructions.'}
+              {authMode === 'login' ? (
+                <>
+                  <span className="md:hidden">Enter your account details to continue.</span>
+                  <span className="hidden md:inline">Sign in to continue to your TapRide account.</span>
+                </>
+              ) : authMode === 'register' ? (
+                <>
+                  <span className="md:hidden">Enter your details to get started.</span>
+                  <span className="hidden md:inline">Register with TapRide to get started.</span>
+                </>
+              ) : (
+                'Enter your email to receive reset instructions.'
+              )}
             </p>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-6" noValidate>
-            {/* ROLE SELECTOR */}
+          <form onSubmit={handleSubmit} className="space-y-5 md:space-y-6" noValidate>
+            {/* ROLE SELECTOR — 3 independent bordered cards (Issue #23 Figma) */}
             {authMode !== 'forgot' && (
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-3">
                   {authMode === 'login' ? 'Login as' : 'Select account type'}
                 </label>
-                <div className="flex bg-slate-50 p-1 rounded-xl border border-gray-100">
+                <div className="grid grid-cols-3 gap-2">
                   {roles.map((r) => (
                     <button
                       key={r.id}
                       type="button"
                       onClick={() => setActiveRole(r.id)}
-                      className={`flex-1 py-2.5 text-sm font-semibold rounded-lg transition-all ${
+                      aria-pressed={activeRole === r.id}
+                      className={`py-2.5 px-1 text-[13px] font-semibold rounded-xl border transition-all ${
                         activeRole === r.id
-                          ? 'bg-white text-blue-600 shadow-sm border border-slate-200'
-                          : 'text-slate-500 hover:text-gray-700'
+                          ? 'bg-blue-50 border-blue-500 text-blue-700 shadow-sm'
+                          : 'bg-white border-gray-200 text-slate-500 hover:border-gray-300 hover:text-gray-700'
                       }`}
                     >
                       {r.label}
@@ -463,7 +516,20 @@ export default function AuthPortal() {
                   </div>
                   {errors.password && <p className={errCls}>{errors.password}</p>}
                   {authMode === 'register' && (
-                    <p className="text-[10px] text-gray-400 mt-2">Use at least 8 characters.</p>
+                    <div className="mt-2">
+                      {/* 4-segment password strength bars (Issue #23 Figma) */}
+                      <div className="flex gap-1.5" aria-label="Password strength">
+                        {[0, 1, 2, 3].map((i) => (
+                          <div
+                            key={i}
+                            className={`h-1.5 flex-1 rounded-full ${
+                              i < pwStrength ? (pwStrength <= 1 ? 'bg-red-500' : pwStrength === 2 ? 'bg-yellow-500' : 'bg-green-500') : 'bg-gray-200'
+                            }`}
+                          />
+                        ))}
+                      </div>
+                      <p className="text-[10px] text-gray-400 mt-1.5">Use at least 8 characters.</p>
+                    </div>
                   )}
                 </div>
                 {authMode === 'register' && (
@@ -528,8 +594,21 @@ export default function AuthPortal() {
               {authMode === 'login' ? 'Sign in to TapRide' : authMode === 'register' ? 'Create TapRide Account' : 'Send Reset Link'}
             </button>
 
+            {/* OR divider + trust badge (Issue #23 Figma, mobile + desktop) */}
+            {authMode === 'login' && (
+              <div className="flex items-center gap-3 pt-1">
+                <div className="flex-1 h-px bg-gray-200" />
+                <span className="text-[11px] font-semibold text-slate-400">OR</span>
+                <div className="flex-1 h-px bg-gray-200" />
+              </div>
+            )}
+            <p className="flex items-center justify-center gap-1.5 text-[11px] text-slate-400">
+              <Lock className="w-3 h-3" />
+              {authMode === 'login' ? 'Your information is securely protected' : 'Your personal information is securely protected'}
+            </p>
+
             {/* FOOTER TOGGLE */}
-            <div className="pt-4 text-center">
+            <div className="pt-1 text-center">
               <span className="text-xs text-slate-500">
                 {authMode === 'login'
                   ? "Don't have a TapRide account? "
@@ -545,6 +624,11 @@ export default function AuthPortal() {
                 {authMode === 'login' ? 'Create an account' : 'Sign in'}
               </button>
             </div>
+
+            {/* Mobile copyright footer (Issue #23 Figma) */}
+            <p className="md:hidden text-center text-[11px] text-slate-400 pt-4 pb-2">
+              © 2026 TapRide · Smart Public Transport Platform
+            </p>
           </form>
         </div>
       </div>
