@@ -327,7 +327,14 @@ export const PassengerQRBoarding: React.FC = () => {
             <ChevronLeft className="w-5 h-5 -ml-0.5" />
           </button>
 
-          <h1 className="text-sm font-bold text-slate-900 tracking-tight">QR Boarding</h1>
+          <div className="flex items-center gap-2">
+            <img
+              src="/logo.jpeg"
+              alt="TapRide Logo"
+              className="w-6 h-6 rounded-md object-contain border border-slate-100 shrink-0"
+            />
+            <h1 className="text-sm font-bold text-slate-900 tracking-tight">QR Boarding</h1>
+          </div>
 
           <button
             type="button"
