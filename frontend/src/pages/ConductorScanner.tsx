@@ -21,7 +21,8 @@ import {
   Clock,
   MapPin,
   ArrowLeftRight,
-  Navigation
+  Navigation,
+  Upload
 } from 'lucide-react'
 
 // Standard Stage Halts on Route 81 (North Central Province: Anuradhapura - Polonnaruwa Corridor)
@@ -96,6 +97,8 @@ export const ConductorScanner: React.FC = () => {
   const [showManualModal, setShowManualModal] = useState<boolean>(false)
   const [showHistoryModal, setShowHistoryModal] = useState<boolean>(false)
   const [showProfileModal, setShowProfileModal] = useState<boolean>(false)
+  const [showSampleQRModal, setShowSampleQRModal] = useState<boolean>(false)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   // Manual entry inputs
   const [manualPassengerId, setManualPassengerId] = useState<string>('')
@@ -435,6 +438,40 @@ export const ConductorScanner: React.FC = () => {
     setShowManualModal(false)
   }
 
+  // Handle Fallback Image Upload Scan
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    const reader = new FileReader()
+    reader.onload = () => {
+      const img = new Image()
+      img.onload = () => {
+        const canvas = canvasRef.current
+        if (canvas) {
+          canvas.width = img.width
+          canvas.height = img.height
+          const ctx = canvas.getContext('2d')
+          if (ctx) {
+            ctx.drawImage(img, 0, 0)
+            const imgData = ctx.getImageData(0, 0, img.width, img.height)
+            const code = jsQR(imgData.data, img.width, img.height, {
+              inversionAttempts: 'attemptBoth'
+            })
+            if (code && code.data) {
+              handleProcessScan(code.data)
+            } else {
+              setScanFeedback('Uploaded image did not contain a recognizable standard QR code.')
+            }
+          }
+        }
+      }
+      img.src = reader.result as string
+    }
+    reader.readAsDataURL(file)
+    e.target.value = ''
+  }
+
   return (
     <div className="min-h-screen bg-slate-100 flex justify-center py-0 sm:py-6 select-none font-sans">
       <div className="w-full max-w-md bg-white sm:rounded-3xl shadow-xl overflow-hidden flex flex-col min-h-screen sm:min-h-[844px] relative border border-slate-200">
@@ -676,7 +713,7 @@ export const ConductorScanner: React.FC = () => {
                 Live Camera Scanner
               </span>
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5">
                 {!cameraActive && (
                   <button
                     onClick={startCamera}
@@ -686,6 +723,14 @@ export const ConductorScanner: React.FC = () => {
                     Retry Camera
                   </button>
                 )}
+                <button
+                  type="button"
+                  onClick={() => setShowSampleQRModal(true)}
+                  className="text-[10px] bg-slate-800 hover:bg-slate-700 text-cyan-300 font-semibold px-2 py-1 rounded-lg border border-cyan-500/40 transition-colors shadow-sm"
+                  title="View standard TapRide passenger boarding QR"
+                >
+                  Sample QR
+                </button>
                 <button
                   onClick={() => handleProcessScan()}
                   disabled={isScanning}
@@ -746,12 +791,12 @@ export const ConductorScanner: React.FC = () => {
               Align the QR code inside the frame
             </p>
 
-            {/* Viewfinder Action Buttons: Flash & Manual Entry */}
-            <div className="flex items-center justify-center gap-3 w-full z-10">
+            {/* Viewfinder Action Buttons: Flash, Manual Entry, and Upload File */}
+            <div className="flex items-center justify-center gap-2 w-full z-10">
               <button
                 type="button"
                 onClick={toggleFlash}
-                className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 px-4 rounded-xl text-xs font-semibold transition-all border ${
+                className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-semibold transition-all border ${
                   isFlashOn
                     ? 'bg-amber-400 text-slate-950 border-amber-300 shadow-md'
                     : 'bg-slate-800/90 hover:bg-slate-800 text-slate-200 border-slate-700'
@@ -764,11 +809,29 @@ export const ConductorScanner: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setShowManualModal(true)}
-                className="flex-1 flex items-center justify-center gap-1.5 py-2.5 px-4 rounded-xl text-xs font-semibold bg-white hover:bg-slate-100 text-slate-900 transition-colors shadow-sm"
+                className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-semibold bg-white hover:bg-slate-100 text-slate-900 transition-colors shadow-sm"
               >
                 <Keyboard className="w-4 h-4 text-slate-700" />
-                <span>Manual Entry</span>
+                <span>Manual</span>
               </button>
+
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-semibold bg-slate-800/90 hover:bg-slate-800 text-cyan-300 border border-cyan-500/30 transition-colors shadow-sm"
+                title="Upload a QR image file directly"
+              >
+                <Upload className="w-4 h-4 text-cyan-400" />
+                <span>Upload</span>
+              </button>
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleFileUpload}
+                className="hidden"
+              />
             </div>
           </section>
 
@@ -1009,6 +1072,67 @@ export const ConductorScanner: React.FC = () => {
               >
                 Close
               </button>
+            </div>
+          </div>
+        )}
+
+        {/* Modal: View Official TapRide Sample Passenger QR */}
+        {showSampleQRModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-fadeIn">
+            <div className="w-full max-w-sm bg-white rounded-3xl p-5 shadow-2xl border border-slate-100 space-y-3.5 text-center">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
+                    <QrCode className="w-4 h-4" />
+                  </div>
+                  <h3 className="text-sm font-bold text-slate-900">Passenger Boarding QR</h3>
+                </div>
+                <button
+                  onClick={() => setShowSampleQRModal(false)}
+                  className="text-slate-400 hover:text-slate-600 p-1"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200/80 flex flex-col items-center">
+                <img
+                  src="/passenger-qr.png"
+                  alt="Standard Passenger QR"
+                  className="w-44 h-44 bg-white p-2 rounded-xl shadow-xs border border-slate-200 object-contain"
+                />
+                <div className="text-xs font-bold text-slate-800 mt-2">Passenger TR-2048</div>
+                <div className="text-[10px] text-slate-500 font-mono">Payload: TR-2048|BUS-NC4521|FARE-NCP</div>
+              </div>
+
+              <div className="bg-blue-50 p-3 rounded-xl text-[11px] text-blue-900 leading-relaxed text-left space-y-1">
+                <div className="font-bold flex items-center gap-1 text-blue-950">
+                  <Info className="w-3.5 h-3.5 text-blue-600" />
+                  How to test camera scanning:
+                </div>
+                <div>1. Open <a href="/passenger-qr.png" target="_blank" rel="noreferrer" className="underline font-bold text-blue-700">/passenger-qr.png</a> on your phone screen.</div>
+                <div>2. Point the phone towards the laptop webcam to verify live scanning.</div>
+              </div>
+
+              <div className="flex items-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowSampleQRModal(false)
+                    handleProcessScan('TR-2048|BUS-NC4521|FARE-NCP')
+                  }}
+                  className="flex-1 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-colors shadow-sm"
+                >
+                  Validate This QR
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowSampleQRModal(false)}
+                  className="py-2 px-3 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors"
+                >
+                  Close
+                </button>
+              </div>
             </div>
           </div>
         )}
