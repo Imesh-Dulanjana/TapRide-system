@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
   ChevronLeft,
@@ -15,7 +15,9 @@ import {
   X,
   ScanLine,
   Check,
-  AlertCircle
+  AlertCircle,
+  RefreshCw,
+  Clock
 } from 'lucide-react'
 
 interface ScannedRecord {
@@ -28,64 +30,246 @@ interface ScannedRecord {
 
 export const ConductorScanner: React.FC = () => {
   const navigate = useNavigate()
+  const videoRef = useRef<HTMLVideoElement | null>(null)
+  const streamRef = useRef<MediaStream | null>(null)
+
+  // Camera & Device states
+  const [cameraActive, setCameraActive] = useState<boolean>(false)
+  const [cameraError, setCameraError] = useState<string | null>(null)
   const [isFlashOn, setIsFlashOn] = useState<boolean>(false)
-  const [isOnline, setIsOnline] = useState<boolean>(true)
+  const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine)
+
+  // Scanning & UI states
+  const [isScanning, setIsScanning] = useState<boolean>(false)
+  const [scanSuccessAnim, setScanSuccessAnim] = useState<boolean>(false)
+  const [scanFeedback, setScanFeedback] = useState<string | null>(null)
+
+  // Modals
   const [showManualModal, setShowManualModal] = useState<boolean>(false)
+  const [showHistoryModal, setShowHistoryModal] = useState<boolean>(false)
+  const [showProfileModal, setShowProfileModal] = useState<boolean>(false)
+
+  // Manual entry inputs
   const [manualPassengerId, setManualPassengerId] = useState<string>('')
   const [manualFare, setManualFare] = useState<string>('52.00')
-  const [scanFeedback, setScanFeedback] = useState<string | null>(null)
-  const [isScanning, setIsScanning] = useState<boolean>(false)
 
-  const [lastScan, setLastScan] = useState<ScannedRecord>({
-    passengerId: 'Passenger TR-2048',
-    scanTime: '11:10 AM',
-    fare: 52,
-    status: 'PAID',
-    route: 'Route 138'
-  })
+  // Scanned history list & last scan
+  const [scanHistory, setScanHistory] = useState<ScannedRecord[]>([
+    {
+      passengerId: 'Passenger TR-2048',
+      scanTime: '11:10 AM',
+      fare: 52,
+      status: 'PAID',
+      route: 'Route 138'
+    },
+    {
+      passengerId: 'Passenger TR-1992',
+      scanTime: '10:54 AM',
+      fare: 68,
+      status: 'PAID',
+      route: 'Route 138'
+    },
+    {
+      passengerId: 'Passenger TR-1874',
+      scanTime: '10:21 AM',
+      fare: 52,
+      status: 'PAID',
+      route: 'Route 138'
+    }
+  ])
 
-  // Simulated scan action for demonstration and automated testing
-  const handleSimulateScan = (passengerIdOverride?: string, fareOverride?: number) => {
-    setIsScanning(true)
-    setTimeout(() => {
-      const now = new Date()
-      const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      const id = passengerIdOverride || `Passenger TR-${Math.floor(1000 + Math.random() * 9000)}`
-      const fare = fareOverride !== undefined ? fareOverride : 52
+  const lastScan = scanHistory[0]
 
-      const newRecord: ScannedRecord = {
-        passengerId: id,
-        scanTime: timeStr,
-        fare: fare,
-        status: 'PAID',
-        route: 'Route 138'
-      }
-
-      setLastScan(newRecord)
-      setIsScanning(false)
-      setScanFeedback(`Successfully validated ${id} (Rs. ${fare.toFixed(2)})`)
-
-      setTimeout(() => {
-        setScanFeedback(null)
-      }, 3500)
-    }, 600)
+  // Native Audio Synthesizer for Transit Validation Beep
+  const playValidationBeep = () => {
+    try {
+      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+      if (!AudioCtx) return
+      const ctx = new AudioCtx()
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.type = 'sine'
+      osc.frequency.setValueAtTime(880, ctx.currentTime) // High pleasant transit chime
+      gain.gain.setValueAtTime(0.12, ctx.currentTime)
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.18)
+      osc.connect(gain)
+      gain.connect(ctx.destination)
+      osc.start()
+      osc.stop(ctx.currentTime + 0.18)
+    } catch {
+      // Audio autoplay policy fallback
+    }
   }
 
+  // Camera Activation via WebRTC MediaDevices
+  const startCamera = async () => {
+    setCameraError(null)
+    try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('Camera API is not supported in this browser environment.')
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: 'environment' },
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        },
+        audio: false
+      })
+
+      streamRef.current = stream
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream
+      }
+      setCameraActive(true)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Camera access was blocked or not found.'
+      setCameraError(message)
+      setCameraActive(false)
+    }
+  }
+
+  // Stop camera stream cleanly
+  const stopCamera = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop())
+      streamRef.current = null
+    }
+    setCameraActive(false)
+  }
+
+  // Toggle Camera Flash / Torch
+  const toggleFlash = async () => {
+    const nextState = !isFlashOn
+    setIsFlashOn(nextState)
+
+    if (streamRef.current) {
+      const track = streamRef.current.getVideoTracks()[0]
+      if (track && 'applyConstraints' in track) {
+        try {
+          await (track as MediaStreamTrack & {
+            applyConstraints: (c: { advanced: Array<{ torch?: boolean }> }) => Promise<void>
+          }).applyConstraints({
+            advanced: [{ torch: nextState }]
+          })
+        } catch {
+          // Torch not supported on some desktop webcams
+        }
+      }
+    }
+  }
+
+  // Real-time Barcode Detection Loop using native BarcodeDetector API
+  useEffect(() => {
+    startCamera()
+
+    const handleOnline = () => setIsOnline(true)
+    const handleOffline = () => setIsOnline(false)
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('offline', handleOffline)
+
+    let detectorInterval: ReturnType<typeof setInterval> | null = null
+
+    interface BarcodeDetectorInstance {
+      detect: (source: ImageBitmapSource) => Promise<Array<{ rawValue: string }>>
+    }
+
+    interface WindowWithBarcodeDetector extends Window {
+      BarcodeDetector?: new (options?: { formats: string[] }) => BarcodeDetectorInstance
+    }
+
+    const customWindow = window as WindowWithBarcodeDetector
+
+    if (customWindow.BarcodeDetector) {
+      try {
+        const detector = new customWindow.BarcodeDetector({ formats: ['qr_code'] })
+        detectorInterval = setInterval(async () => {
+          if (videoRef.current && videoRef.current.readyState === 4 && !isScanning) {
+            try {
+              const barcodes = await detector.detect(videoRef.current)
+              if (barcodes.length > 0 && barcodes[0].rawValue) {
+                handleProcessScan(barcodes[0].rawValue)
+              }
+            } catch {
+              // Frame decode exception
+            }
+          }
+        }, 400)
+      } catch {
+        // Fallback if BarcodeDetector initialization fails
+      }
+    }
+
+    return () => {
+      stopCamera()
+      if (detectorInterval) clearInterval(detectorInterval)
+      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('offline', handleOffline)
+    }
+  }, [])
+
+  // Process & Record Scanned Passenger
+  const handleProcessScan = (rawContent?: string, fareOverride?: number) => {
+    if (isScanning) return
+    setIsScanning(true)
+
+    // Parse identifier
+    let passengerDisplay = `Passenger TR-${Math.floor(1000 + Math.random() * 9000)}`
+    if (rawContent) {
+      try {
+        const parsed = JSON.parse(rawContent)
+        if (parsed.passengerId) passengerDisplay = parsed.passengerId
+      } catch {
+        if (rawContent.includes('TR-') || rawContent.length < 25) {
+          passengerDisplay = rawContent.startsWith('TR-') ? `Passenger ${rawContent}` : rawContent
+        }
+      }
+    }
+
+    const fare = fareOverride !== undefined ? fareOverride : 52
+    const now = new Date()
+    const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+
+    // Play feedback
+    playValidationBeep()
+    if ('vibrate' in navigator) {
+      navigator.vibrate([70, 40, 70])
+    }
+
+    setScanSuccessAnim(true)
+    setTimeout(() => setScanSuccessAnim(false), 900)
+
+    const newRecord: ScannedRecord = {
+      passengerId: passengerDisplay,
+      scanTime: timeStr,
+      fare: fare,
+      status: 'PAID',
+      route: 'Route 138'
+    }
+
+    setScanHistory((prev) => [newRecord, ...prev])
+    setScanFeedback(`Validated ${passengerDisplay} • Fare Rs. ${fare.toFixed(2)} deducted.`)
+    setIsScanning(false)
+
+    setTimeout(() => {
+      setScanFeedback(null)
+    }, 4000)
+  }
+
+  // Handle Manual Entry Modal Submit
   const handleManualSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!manualPassengerId.trim()) return
 
-    const fareNum = parseFloat(manualFare) || 52
-    handleSimulateScan(
-      manualPassengerId.startsWith('TR-') ? `Passenger ${manualPassengerId}` : manualPassengerId,
-      fareNum
-    )
+    const parsedFare = parseFloat(manualFare) || 52
+    handleProcessScan(manualPassengerId.trim(), parsedFare)
     setManualPassengerId('')
     setShowManualModal(false)
   }
 
   return (
-    <div className="min-h-screen bg-slate-100 flex justify-center py-0 sm:py-6">
+    <div className="min-h-screen bg-slate-100 flex justify-center py-0 sm:py-6 select-none font-sans">
       <div className="w-full max-w-md bg-white sm:rounded-3xl shadow-xl overflow-hidden flex flex-col min-h-screen sm:min-h-[844px] relative border border-slate-200">
         
         {/* Top App Header */}
@@ -106,7 +290,7 @@ export const ConductorScanner: React.FC = () => {
           {/* Online/Offline Status Indicator */}
           <button
             onClick={() => setIsOnline(!isOnline)}
-            title="Click to toggle network state for testing"
+            title="Click to toggle network state"
             className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold transition-colors border ${
               isOnline
                 ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
@@ -125,7 +309,7 @@ export const ConductorScanner: React.FC = () => {
         {/* Scrollable Content Body */}
         <main className="flex-1 px-5 py-4 overflow-y-auto pb-24 space-y-4">
           
-          {/* Notification Toast */}
+          {/* Validation Toast Message */}
           {scanFeedback && (
             <div className="bg-emerald-600 text-white text-xs px-3.5 py-2.5 rounded-xl shadow-md flex items-center justify-between animate-fadeIn">
               <div className="flex items-center gap-2">
@@ -164,49 +348,90 @@ export const ConductorScanner: React.FC = () => {
             </p>
           </div>
 
-          {/* Camera Viewfinder Box */}
-          <section className="bg-slate-950 rounded-3xl p-5 text-center relative overflow-hidden shadow-inner flex flex-col items-center justify-between min-h-[340px] border border-slate-800">
-            {/* Header label inside viewfinder */}
-            <div className="w-full flex items-center justify-between">
-              <span className="text-[10px] tracking-widest text-slate-400 uppercase font-semibold">
-                Camera Scanner
+          {/* Camera Viewfinder Box with Live Video Feed */}
+          <section className="bg-slate-950 rounded-3xl p-5 text-center relative overflow-hidden shadow-inner flex flex-col items-center justify-between min-h-[350px] border border-slate-800">
+            
+            {/* Live Video Background */}
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted
+              className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-300 ${
+                cameraActive ? 'opacity-70' : 'opacity-0'
+              }`}
+            />
+
+            {/* Success flash overlay */}
+            {scanSuccessAnim && (
+              <div className="absolute inset-0 bg-emerald-500/30 backdrop-blur-xs z-10 flex items-center justify-center animate-pulse">
+                <div className="w-16 h-16 rounded-full bg-emerald-500 text-white flex items-center justify-center shadow-lg">
+                  <Check className="w-10 h-10" />
+                </div>
+              </div>
+            )}
+
+            {/* Top Viewfinder Controls */}
+            <div className="w-full flex items-center justify-between z-10">
+              <span className="text-[10px] tracking-widest text-slate-300 uppercase font-semibold drop-shadow-sm flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
+                Live Camera Scanner
               </span>
-              <button
-                onClick={() => handleSimulateScan()}
-                disabled={isScanning}
-                className="text-[10px] bg-blue-600/80 hover:bg-blue-600 text-white font-medium px-2 py-0.5 rounded-md transition-colors"
-              >
-                {isScanning ? 'Validating...' : 'Simulate Scan'}
-              </button>
+
+              <div className="flex items-center gap-2">
+                {!cameraActive && (
+                  <button
+                    onClick={startCamera}
+                    className="text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium px-2 py-0.5 rounded-md flex items-center gap-1"
+                  >
+                    <RefreshCw className="w-3 h-3" />
+                    Retry Camera
+                  </button>
+                )}
+                <button
+                  onClick={() => handleProcessScan()}
+                  disabled={isScanning}
+                  className="text-[10px] bg-blue-600 hover:bg-blue-500 text-white font-semibold px-2.5 py-1 rounded-lg transition-colors shadow-sm"
+                >
+                  {isScanning ? 'Processing...' : 'Simulate Scan'}
+                </button>
+              </div>
             </div>
 
             {/* Target Scanning Frame */}
-            <div className="relative w-52 h-52 flex items-center justify-center my-auto">
+            <div className="relative w-52 h-52 flex items-center justify-center my-auto z-10">
               {/* Corner brackets matching Figma design */}
-              <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-blue-500 rounded-tl-xl" />
-              <div className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-blue-500 rounded-tr-xl" />
-              <div className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 border-blue-500 rounded-bl-xl" />
-              <div className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 border-blue-500 rounded-br-xl" />
+              <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-blue-400 rounded-tl-xl drop-shadow-[0_0_8px_rgba(96,165,250,0.8)]" />
+              <div className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-blue-400 rounded-tr-xl drop-shadow-[0_0_8px_rgba(96,165,250,0.8)]" />
+              <div className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 border-blue-400 rounded-bl-xl drop-shadow-[0_0_8px_rgba(96,165,250,0.8)]" />
+              <div className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 border-blue-400 rounded-br-xl drop-shadow-[0_0_8px_rgba(96,165,250,0.8)]" />
 
-              {/* Viewfinder background grid icon */}
-              <div className="text-slate-800 flex flex-col items-center justify-center">
-                <ScanLine className="w-20 h-20 opacity-30 text-slate-500" />
-              </div>
+              {/* Viewfinder fallback icon when video is not granted */}
+              {!cameraActive && (
+                <div className="text-slate-700 flex flex-col items-center justify-center">
+                  <ScanLine className="w-20 h-20 opacity-30 text-slate-400" />
+                  {cameraError && (
+                    <span className="text-[10px] text-slate-400 mt-2 max-w-[170px] leading-tight">
+                      Camera preview ready. Tap "Simulate Scan" or allow browser camera permissions.
+                    </span>
+                  )}
+                </div>
+              )}
 
-              {/* Laser Animation Bar */}
+              {/* Laser Scanning Animation Bar */}
               <div className="absolute inset-x-4 h-0.5 bg-blue-400 shadow-[0_0_12px_#60a5fa] animate-pulse" />
             </div>
 
             {/* Frame Helper Text */}
-            <p className="text-xs text-slate-400 font-medium mb-3">
+            <p className="text-xs text-slate-300 font-medium mb-3 z-10 drop-shadow-sm">
               Align the QR code inside the frame
             </p>
 
             {/* Viewfinder Action Buttons: Flash & Manual Entry */}
-            <div className="flex items-center justify-center gap-3 w-full">
+            <div className="flex items-center justify-center gap-3 w-full z-10">
               <button
                 type="button"
-                onClick={() => setIsFlashOn(!isFlashOn)}
+                onClick={toggleFlash}
                 className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 px-4 rounded-xl text-xs font-semibold transition-all border ${
                   isFlashOn
                     ? 'bg-amber-400 text-slate-950 border-amber-300 shadow-md'
@@ -244,7 +469,15 @@ export const ConductorScanner: React.FC = () => {
 
           {/* Last Successful Scan Card */}
           <section className="pt-1">
-            <h3 className="text-xs font-bold text-slate-800 mb-2">Last Successful Scan</h3>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-xs font-bold text-slate-800">Last Successful Scan</h3>
+              <button
+                onClick={() => setShowHistoryModal(true)}
+                className="text-[11px] font-semibold text-blue-600 hover:text-blue-700"
+              >
+                View Log ({scanHistory.length})
+              </button>
+            </div>
             <div className="bg-white border border-slate-200 rounded-2xl p-3.5 flex items-center justify-between shadow-sm">
               <div className="flex items-center gap-3">
                 <div className="w-9 h-9 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-100 flex items-center justify-center shrink-0">
@@ -342,6 +575,112 @@ export const ConductorScanner: React.FC = () => {
           </div>
         )}
 
+        {/* Modal: History / Scanned Passenger Log */}
+        {showHistoryModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-fadeIn">
+            <div className="w-full max-w-sm bg-white rounded-3xl p-5 shadow-2xl border border-slate-100 flex flex-col max-h-[80vh]">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
+                    <History className="w-4 h-4" />
+                  </div>
+                  <h3 className="text-sm font-bold text-slate-900">Today's Validated Scans</h3>
+                </div>
+                <button
+                  onClick={() => setShowHistoryModal(false)}
+                  className="text-slate-400 hover:text-slate-600 p-1"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto py-3 space-y-2">
+                {scanHistory.map((item, idx) => (
+                  <div
+                    key={idx}
+                    className="p-3 rounded-xl border border-slate-100 bg-slate-50 flex items-center justify-between"
+                  >
+                    <div>
+                      <div className="text-xs font-bold text-slate-900">{item.passengerId}</div>
+                      <div className="text-[10px] text-slate-500 flex items-center gap-1.5 mt-0.5">
+                        <Clock className="w-3 h-3 text-slate-400" />
+                        {item.scanTime} • {item.route}
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-xs font-bold text-slate-900">Rs. {item.fare.toFixed(0)}</div>
+                      <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded-full border border-emerald-200">
+                        {item.status}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="pt-2 border-t border-slate-100">
+                <button
+                  onClick={() => setShowHistoryModal(false)}
+                  className="w-full py-2 text-xs font-bold text-slate-700 hover:bg-slate-100 rounded-xl transition-colors"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal: Conductor Profile */}
+        {showProfileModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-fadeIn">
+            <div className="w-full max-w-sm bg-white rounded-3xl p-5 shadow-2xl border border-slate-100 space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
+                    <User className="w-4 h-4" />
+                  </div>
+                  <h3 className="text-sm font-bold text-slate-900">Conductor Profile</h3>
+                </div>
+                <button
+                  onClick={() => setShowProfileModal(false)}
+                  className="text-slate-400 hover:text-slate-600 p-1"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="space-y-2.5 text-xs">
+                <div className="flex justify-between py-1.5 border-b border-slate-50">
+                  <span className="text-slate-500 font-medium">Conductor Name</span>
+                  <span className="font-bold text-slate-900">Kasun Perera</span>
+                </div>
+                <div className="flex justify-between py-1.5 border-b border-slate-50">
+                  <span className="text-slate-500 font-medium">Crew ID</span>
+                  <span className="font-bold text-slate-900">C-402</span>
+                </div>
+                <div className="flex justify-between py-1.5 border-b border-slate-50">
+                  <span className="text-slate-500 font-medium">Assigned Bus</span>
+                  <span className="font-bold text-slate-900">NB-4521</span>
+                </div>
+                <div className="flex justify-between py-1.5 border-b border-slate-50">
+                  <span className="text-slate-500 font-medium">Route</span>
+                  <span className="font-bold text-slate-900">138 (Colombo - Kaduwela)</span>
+                </div>
+                <div className="flex justify-between py-1.5">
+                  <span className="text-slate-500 font-medium">Shift Status</span>
+                  <span className="font-bold text-emerald-600">Active Shift (06:00 - 14:00)</span>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setShowProfileModal(false)}
+                className="w-full py-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Bottom Navigation Bar */}
         <nav className="absolute bottom-0 inset-x-0 bg-white border-t border-slate-200 px-6 py-2.5 flex items-center justify-around z-20">
           <Link
@@ -365,7 +704,7 @@ export const ConductorScanner: React.FC = () => {
 
           <button
             type="button"
-            onClick={() => setScanFeedback('Conductor Journey History: 186 passengers validated today.')}
+            onClick={() => setShowHistoryModal(true)}
             className="flex flex-col items-center gap-1 text-slate-400 hover:text-slate-600 transition-colors"
           >
             <History className="w-5 h-5" />
@@ -374,7 +713,7 @@ export const ConductorScanner: React.FC = () => {
 
           <button
             type="button"
-            onClick={() => setScanFeedback('Conductor Profile: Kasun Perera (ID: C-402)')}
+            onClick={() => setShowProfileModal(true)}
             className="flex flex-col items-center gap-1 text-slate-400 hover:text-slate-600 transition-colors"
           >
             <User className="w-5 h-5" />
