@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import jsQR from 'jsqr'
 import {
   ChevronLeft,
   Bus,
@@ -31,7 +32,9 @@ interface ScannedRecord {
 export const ConductorScanner: React.FC = () => {
   const navigate = useNavigate()
   const videoRef = useRef<HTMLVideoElement | null>(null)
+  const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
+  const lastScannedTimeRef = useRef<number>(0)
 
   // Camera & Device states
   const [cameraActive, setCameraActive] = useState<boolean>(false)
@@ -97,7 +100,7 @@ export const ConductorScanner: React.FC = () => {
       osc.start()
       osc.stop(ctx.currentTime + 0.18)
     } catch {
-      // Audio autoplay policy fallback
+      // Audio fallback
     }
   }
 
@@ -154,13 +157,13 @@ export const ConductorScanner: React.FC = () => {
             advanced: [{ torch: nextState }]
           })
         } catch {
-          // Torch not supported on some desktop webcams
+          // Torch not supported on some webcams
         }
       }
     }
   }
 
-  // Real-time Barcode Detection Loop using native BarcodeDetector API
+  // Real-Time Frame Processing with jsQR
   useEffect(() => {
     startCamera()
 
@@ -169,41 +172,43 @@ export const ConductorScanner: React.FC = () => {
     window.addEventListener('online', handleOnline)
     window.addEventListener('offline', handleOffline)
 
-    let detectorInterval: ReturnType<typeof setInterval> | null = null
+    let animationFrameId: number
 
-    interface BarcodeDetectorInstance {
-      detect: (source: ImageBitmapSource) => Promise<Array<{ rawValue: string }>>
-    }
+    const scanFrame = () => {
+      const video = videoRef.current
+      const canvas = canvasRef.current
 
-    interface WindowWithBarcodeDetector extends Window {
-      BarcodeDetector?: new (options?: { formats: string[] }) => BarcodeDetectorInstance
-    }
+      if (video && video.readyState === video.HAVE_ENOUGH_DATA && canvas) {
+        const ctx = canvas.getContext('2d', { willReadFrequently: true })
+        if (ctx) {
+          canvas.width = video.videoWidth
+          canvas.height = video.videoHeight
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
 
-    const customWindow = window as WindowWithBarcodeDetector
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+          const code = jsQR(imageData.data, imageData.width, imageData.height, {
+            inversionAttempts: 'dontInvert'
+          })
 
-    if (customWindow.BarcodeDetector) {
-      try {
-        const detector = new customWindow.BarcodeDetector({ formats: ['qr_code'] })
-        detectorInterval = setInterval(async () => {
-          if (videoRef.current && videoRef.current.readyState === 4 && !isScanning) {
-            try {
-              const barcodes = await detector.detect(videoRef.current)
-              if (barcodes.length > 0 && barcodes[0].rawValue) {
-                handleProcessScan(barcodes[0].rawValue)
-              }
-            } catch {
-              // Frame decode exception
+          if (code && code.data) {
+            const now = Date.now()
+            // 3-second debounce between scans
+            if (now - lastScannedTimeRef.current > 3000) {
+              lastScannedTimeRef.current = now
+              handleProcessScan(code.data)
             }
           }
-        }, 400)
-      } catch {
-        // Fallback if BarcodeDetector initialization fails
+        }
       }
+
+      animationFrameId = requestAnimationFrame(scanFrame)
     }
+
+    animationFrameId = requestAnimationFrame(scanFrame)
 
     return () => {
       stopCamera()
-      if (detectorInterval) clearInterval(detectorInterval)
+      cancelAnimationFrame(animationFrameId)
       window.removeEventListener('online', handleOnline)
       window.removeEventListener('offline', handleOffline)
     }
@@ -223,6 +228,8 @@ export const ConductorScanner: React.FC = () => {
       } catch {
         if (rawContent.includes('TR-') || rawContent.length < 25) {
           passengerDisplay = rawContent.startsWith('TR-') ? `Passenger ${rawContent}` : rawContent
+        } else {
+          passengerDisplay = `Passenger TR-${Math.floor(1000 + Math.random() * 9000)}`
         }
       }
     }
@@ -272,6 +279,9 @@ export const ConductorScanner: React.FC = () => {
     <div className="min-h-screen bg-slate-100 flex justify-center py-0 sm:py-6 select-none font-sans">
       <div className="w-full max-w-md bg-white sm:rounded-3xl shadow-xl overflow-hidden flex flex-col min-h-screen sm:min-h-[844px] relative border border-slate-200">
         
+        {/* Hidden Canvas for Live QR Frame Capture */}
+        <canvas ref={canvasRef} className="hidden" />
+
         {/* Top App Header */}
         <header className="px-5 pt-5 pb-3 flex items-center justify-between bg-white border-b border-slate-100 sticky top-0 z-20">
           <button
@@ -364,7 +374,7 @@ export const ConductorScanner: React.FC = () => {
 
             {/* Success flash overlay */}
             {scanSuccessAnim && (
-              <div className="absolute inset-0 bg-emerald-500/30 backdrop-blur-xs z-10 flex items-center justify-center animate-pulse">
+              <div className="absolute inset-0 bg-emerald-500/30 backdrop-blur-xs z-20 flex items-center justify-center animate-pulse">
                 <div className="w-16 h-16 rounded-full bg-emerald-500 text-white flex items-center justify-center shadow-lg">
                   <Check className="w-10 h-10" />
                 </div>
@@ -399,12 +409,12 @@ export const ConductorScanner: React.FC = () => {
             </div>
 
             {/* Target Scanning Frame */}
-            <div className="relative w-52 h-52 flex items-center justify-center my-auto z-10">
+            <div className="relative w-52 h-52 flex items-center justify-center my-auto z-10 overflow-hidden rounded-2xl">
               {/* Corner brackets matching Figma design */}
-              <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-blue-400 rounded-tl-xl drop-shadow-[0_0_8px_rgba(96,165,250,0.8)]" />
-              <div className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-blue-400 rounded-tr-xl drop-shadow-[0_0_8px_rgba(96,165,250,0.8)]" />
-              <div className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 border-blue-400 rounded-bl-xl drop-shadow-[0_0_8px_rgba(96,165,250,0.8)]" />
-              <div className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 border-blue-400 rounded-br-xl drop-shadow-[0_0_8px_rgba(96,165,250,0.8)]" />
+              <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-blue-400 rounded-tl-xl drop-shadow-[0_0_8px_rgba(96,165,250,0.8)] z-20 pointer-events-none" />
+              <div className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-blue-400 rounded-tr-xl drop-shadow-[0_0_8px_rgba(96,165,250,0.8)] z-20 pointer-events-none" />
+              <div className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 border-blue-400 rounded-bl-xl drop-shadow-[0_0_8px_rgba(96,165,250,0.8)] z-20 pointer-events-none" />
+              <div className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 border-blue-400 rounded-br-xl drop-shadow-[0_0_8px_rgba(96,165,250,0.8)] z-20 pointer-events-none" />
 
               {/* Viewfinder fallback icon when video is not granted */}
               {!cameraActive && (
@@ -418,8 +428,8 @@ export const ConductorScanner: React.FC = () => {
                 </div>
               )}
 
-              {/* Laser Scanning Animation Bar */}
-              <div className="absolute inset-x-4 h-0.5 bg-blue-400 shadow-[0_0_12px_#60a5fa] animate-pulse" />
+              {/* Laser Scanning Animation Bar - Moving Smoothly Up and Down */}
+              <div className="animate-scan-laser-sweep z-10 pointer-events-none" />
             </div>
 
             {/* Frame Helper Text */}
