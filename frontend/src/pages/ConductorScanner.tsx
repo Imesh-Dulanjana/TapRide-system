@@ -90,6 +90,18 @@ export const ConductorScanner: React.FC = () => {
   const [toStop, setToStop] = useState<string>('Kaduruwela (Polonnaruwa Central)')
   const [currentFare, setCurrentFare] = useState<number>(220)
 
+  // Fresh state refs to prevent stale closures in requestAnimationFrame scan loop
+  const fromStopRef = useRef<string>(fromStop)
+  const toStopRef = useRef<string>(toStop)
+  const currentFareRef = useRef<number>(currentFare)
+  const scanHistoryRef = useRef<ScannedRecord[]>([])
+  const handleProcessScanRef = useRef<(rawContent?: string, fareOverride?: number) => void>(() => {})
+
+  // Keep refs synchronized on every render
+  fromStopRef.current = fromStop
+  toStopRef.current = toStop
+  currentFareRef.current = currentFare
+
   // Scanning & UI states
   const [scanSuccessAnim, setScanSuccessAnim] = useState<boolean>(false)
   const [scanFeedback, setScanFeedback] = useState<string | null>(null)
@@ -137,6 +149,9 @@ export const ConductorScanner: React.FC = () => {
       toStop: 'Polonnaruwa Old Town'
     }
   ])
+
+  // Synchronize scanHistoryRef with active history state
+  scanHistoryRef.current = scanHistory
 
   const lastScan = scanHistory[0] || {
     passengerId: 'No recent scan',
@@ -395,7 +410,7 @@ export const ConductorScanner: React.FC = () => {
           }
 
           if (detectedContent) {
-            handleProcessScan(detectedContent)
+            handleProcessScanRef.current(detectedContent)
           }
         } finally {
           isProcessing = false
@@ -419,6 +434,12 @@ export const ConductorScanner: React.FC = () => {
   const handleProcessScan = (rawContent?: string, fareOverride?: number) => {
     // Immediately pause scanning loop to prevent duplicate reads
     isPausedRef.current = true
+
+    // Always fetch active stops and calculate fresh dynamic fare from refs to prevent stale closures
+    const activeFrom = fromStopRef.current
+    const activeTo = toStopRef.current
+    const activeFare = fareOverride !== undefined ? fareOverride : calculateFare(activeFrom, activeTo)
+    const activeHistory = scanHistoryRef.current
 
     // Parse identifier into clean TapRide Passenger format
     let passengerDisplay = `Passenger TR-${Math.floor(1000 + Math.random() * 9000)}`
@@ -452,12 +473,12 @@ export const ConductorScanner: React.FC = () => {
       }
     }
 
-    const fare = fareOverride !== undefined ? fareOverride : currentFare
+    const fare = activeFare
     const now = new Date()
     const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 
     // Check duplicate scan within current session to prevent multiple charges on the same passenger
-    const existingRecent = scanHistory.find(
+    const existingRecent = activeHistory.find(
       (item) => item.passengerId.toLowerCase() === passengerDisplay.toLowerCase()
     )
 
@@ -493,26 +514,33 @@ export const ConductorScanner: React.FC = () => {
       fare: fare,
       status: 'PAID',
       route: 'Route 81',
-      fromStop: fromStop,
-      toStop: toStop,
+      fromStop: activeFrom,
+      toStop: activeTo,
       isDuplicate: false
     }
 
-    setScanHistory((prev) => [newRecord, ...prev])
+    setScanHistory((prev) => {
+      const updated = [newRecord, ...prev]
+      scanHistoryRef.current = updated
+      return updated
+    })
     setActiveValidationResult(newRecord)
-    setScanFeedback(`Validated ${passengerDisplay} • ${fromStop} → ${toStop} • Fare Rs. ${fare.toFixed(2)} deducted.`)
+    setScanFeedback(`Validated ${passengerDisplay} • ${activeFrom} → ${activeTo} • Fare Rs. ${fare.toFixed(2)} deducted.`)
 
     setTimeout(() => {
       setScanFeedback(null)
     }, 4500)
   }
 
+  // Keep handleProcessScanRef synchronized on every render
+  handleProcessScanRef.current = handleProcessScan
+
   // Handle Manual Entry Modal Submit
   const handleManualSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!manualPassengerId.trim()) return
 
-    const parsedFare = parseFloat(manualFare) || currentFare
+    const parsedFare = parseFloat(manualFare) || calculateFare(fromStopRef.current, toStopRef.current)
     handleProcessScan(manualPassengerId.trim(), parsedFare)
     setManualPassengerId('')
     setShowManualModal(false)
