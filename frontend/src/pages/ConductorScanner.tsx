@@ -24,38 +24,38 @@ import {
   Navigation
 } from 'lucide-react'
 
-// Standard Stage Halts on Route 138 (Colombo - Kaduwela / Homagama corridor)
-const ROUTE_138_STOPS = [
-  'Pettah (Fort)',
-  'Maradana / Tech',
-  'Borella',
-  'Rajagiriya',
-  'Battaramulla',
-  'Pelawatte',
-  'Thalahena',
-  'Malabe',
-  'Pittugala (SLIIT)',
-  'Kaduwela'
+// Standard Stage Halts on Route 81 (North Central Province: Anuradhapura - Polonnaruwa Corridor)
+const ROUTE_NCP_STOPS = [
+  'Anuradhapura (New Town)',
+  'Mihintale Junction',
+  'Maradankadawala',
+  'Kekirawa Town',
+  'Habarana Junction',
+  'Minneriya',
+  'Hingurakgoda',
+  'Giritale',
+  'Polonnaruwa Old Town',
+  'Kaduruwela (Polonnaruwa Central)'
 ]
 
-// Dynamic Distance/Stage-Based Fare Calculator (National Transport Commission Scale)
+// Dynamic Distance/Stage-Based Fare Calculator (North Central Province Tariff Scale)
 const calculateFare = (from: string, to: string): number => {
-  const fromIdx = ROUTE_138_STOPS.indexOf(from)
-  const toIdx = ROUTE_138_STOPS.indexOf(to)
+  const fromIdx = ROUTE_NCP_STOPS.indexOf(from)
+  const toIdx = ROUTE_NCP_STOPS.indexOf(to)
   const stages = Math.abs(toIdx - fromIdx)
   if (stages <= 0) return 30 // Minimum stop fare
   const fareTable: { [key: number]: number } = {
     1: 30,
-    2: 42,
-    3: 52,
-    4: 68,
-    5: 84,
-    6: 102,
-    7: 120,
-    8: 138,
-    9: 155
+    2: 45,
+    3: 60,
+    4: 80,
+    5: 105,
+    6: 130,
+    7: 160,
+    8: 190,
+    9: 220
   }
-  return fareTable[stages] || 30 + stages * 15
+  return fareTable[stages] || 30 + stages * 22
 }
 
 interface ScannedRecord {
@@ -81,11 +81,11 @@ export const ConductorScanner: React.FC = () => {
   const [isFlashOn, setIsFlashOn] = useState<boolean>(false)
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine)
 
-  // Journey & Route Stage Selection
-  const [busDirection, setBusDirection] = useState<'Colombo → Kaduwela' | 'Kaduwela → Colombo'>('Colombo → Kaduwela')
-  const [fromStop, setFromStop] = useState<string>('Pettah (Fort)')
-  const [toStop, setToStop] = useState<string>('Malabe')
-  const [currentFare, setCurrentFare] = useState<number>(84)
+  // Journey & Route Stage Selection (North Central Province)
+  const [busDirection, setBusDirection] = useState<'Anuradhapura → Polonnaruwa' | 'Polonnaruwa → Anuradhapura'>('Anuradhapura → Polonnaruwa')
+  const [fromStop, setFromStop] = useState<string>('Anuradhapura (New Town)')
+  const [toStop, setToStop] = useState<string>('Kaduruwela (Polonnaruwa Central)')
+  const [currentFare, setCurrentFare] = useState<number>(220)
 
   // Scanning & UI states
   const [isScanning, setIsScanning] = useState<boolean>(false)
@@ -99,36 +99,36 @@ export const ConductorScanner: React.FC = () => {
 
   // Manual entry inputs
   const [manualPassengerId, setManualPassengerId] = useState<string>('')
-  const [manualFare, setManualFare] = useState<string>('84.00')
+  const [manualFare, setManualFare] = useState<string>('220.00')
 
   // Scanned history list & last scan
   const [scanHistory, setScanHistory] = useState<ScannedRecord[]>([
     {
       passengerId: 'Passenger TR-2048',
       scanTime: '11:10 AM',
-      fare: 52,
+      fare: 45,
       status: 'PAID',
-      route: 'Route 138',
-      fromStop: 'Borella',
-      toStop: 'Battaramulla'
+      route: 'Route 81',
+      fromStop: 'Anuradhapura (New Town)',
+      toStop: 'Mihintale Junction'
     },
     {
       passengerId: 'Passenger TR-1992',
       scanTime: '10:54 AM',
-      fare: 84,
+      fare: 105,
       status: 'PAID',
-      route: 'Route 138',
-      fromStop: 'Pettah (Fort)',
-      toStop: 'Malabe'
+      route: 'Route 81',
+      fromStop: 'Habarana Junction',
+      toStop: 'Kaduruwela (Polonnaruwa Central)'
     },
     {
       passengerId: 'Passenger TR-1874',
       scanTime: '10:21 AM',
-      fare: 42,
+      fare: 60,
       status: 'PAID',
-      route: 'Route 138',
-      fromStop: 'Maradana / Tech',
-      toStop: 'Borella'
+      route: 'Route 81',
+      fromStop: 'Minneriya',
+      toStop: 'Polonnaruwa Old Town'
     }
   ])
 
@@ -143,14 +143,14 @@ export const ConductorScanner: React.FC = () => {
 
   // Advance bus to next stop along the route
   const handleAdvanceNextHalt = () => {
-    const currentIdx = ROUTE_138_STOPS.indexOf(fromStop)
-    if (busDirection === 'Colombo → Kaduwela') {
-      if (currentIdx < ROUTE_138_STOPS.length - 1) {
-        setFromStop(ROUTE_138_STOPS[currentIdx + 1])
+    const currentIdx = ROUTE_NCP_STOPS.indexOf(fromStop)
+    if (busDirection === 'Anuradhapura → Polonnaruwa') {
+      if (currentIdx < ROUTE_NCP_STOPS.length - 1) {
+        setFromStop(ROUTE_NCP_STOPS[currentIdx + 1])
       }
     } else {
       if (currentIdx > 0) {
-        setFromStop(ROUTE_138_STOPS[currentIdx - 1])
+        setFromStop(ROUTE_NCP_STOPS[currentIdx - 1])
       }
     }
   }
@@ -410,7 +410,7 @@ export const ConductorScanner: React.FC = () => {
       scanTime: timeStr,
       fare: fare,
       status: 'PAID',
-      route: 'Route 138',
+      route: 'Route 81',
       fromStop: fromStop,
       toStop: toStop
     }
@@ -454,7 +454,7 @@ export const ConductorScanner: React.FC = () => {
 
           <div className="text-center">
             <h1 className="text-base font-bold text-slate-900 leading-tight">Conductor Scanner</h1>
-            <p className="text-[11px] text-slate-500 font-medium">TapRide Conductor</p>
+            <p className="text-[11px] text-slate-500 font-medium">TapRide Conductor • North Central</p>
           </div>
 
           {/* Online/Offline Status Indicator */}
@@ -500,19 +500,19 @@ export const ConductorScanner: React.FC = () => {
               </div>
               <div>
                 <div className="text-sm font-bold text-slate-900">
-                  NB-4521 <span className="text-slate-400 font-normal">•</span> Route 138
+                  NC NB-4521 <span className="text-slate-400 font-normal">•</span> Route 81
                 </div>
                 <button
                   type="button"
                   onClick={() => {
-                    const newDir = busDirection === 'Colombo → Kaduwela' ? 'Kaduwela → Colombo' : 'Colombo → Kaduwela'
+                    const newDir = busDirection === 'Anuradhapura → Polonnaruwa' ? 'Polonnaruwa → Anuradhapura' : 'Anuradhapura → Polonnaruwa'
                     setBusDirection(newDir)
-                    if (newDir === 'Kaduwela → Colombo') {
-                      setFromStop('Kaduwela')
-                      setToStop('Pettah (Fort)')
+                    if (newDir === 'Polonnaruwa → Anuradhapura') {
+                      setFromStop('Kaduruwela (Polonnaruwa Central)')
+                      setToStop('Anuradhapura (New Town)')
                     } else {
-                      setFromStop('Pettah (Fort)')
-                      setToStop('Kaduwela')
+                      setFromStop('Anuradhapura (New Town)')
+                      setToStop('Kaduruwela (Polonnaruwa Central)')
                     }
                   }}
                   className="text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1 mt-0.5"
@@ -534,12 +534,12 @@ export const ConductorScanner: React.FC = () => {
               <div className="flex items-center gap-1.5">
                 <Navigation className="w-3.5 h-3.5 text-cyan-400" />
                 <span className="text-[11px] font-bold uppercase tracking-wider text-slate-200">
-                  Select Journey Stage
+                  Select Journey Stage (NCP)
                 </span>
               </div>
               <div className="flex items-center gap-1.5">
                 <span className="text-[10px] text-blue-300 font-medium bg-blue-900/80 px-2 py-0.5 rounded-full border border-blue-700/50">
-                  {Math.abs(ROUTE_138_STOPS.indexOf(toStop) - ROUTE_138_STOPS.indexOf(fromStop)) || 1} Stages
+                  {Math.abs(ROUTE_NCP_STOPS.indexOf(toStop) - ROUTE_NCP_STOPS.indexOf(fromStop)) || 1} Stages
                 </span>
                 <span className="text-sm font-black text-cyan-300 bg-cyan-950/90 border border-cyan-400/50 px-2.5 py-0.5 rounded-lg shadow-sm">
                   Rs. {currentFare.toFixed(0)}
@@ -560,7 +560,7 @@ export const ConductorScanner: React.FC = () => {
                   onChange={(e) => setFromStop(e.target.value)}
                   className="w-full bg-slate-900/90 text-white border border-blue-700/60 rounded-xl px-2 py-1.5 text-xs font-semibold focus:outline-none focus:border-cyan-400 cursor-pointer"
                 >
-                  {ROUTE_138_STOPS.map((stop) => (
+                  {ROUTE_NCP_STOPS.map((stop) => (
                     <option key={stop} value={stop} className="bg-slate-900 text-white">
                       {stop}
                     </option>
@@ -591,7 +591,7 @@ export const ConductorScanner: React.FC = () => {
                   onChange={(e) => setToStop(e.target.value)}
                   className="w-full bg-slate-900/90 text-white border border-blue-700/60 rounded-xl px-2 py-1.5 text-xs font-semibold focus:outline-none focus:border-cyan-400 cursor-pointer"
                 >
-                  {ROUTE_138_STOPS.map((stop) => (
+                  {ROUTE_NCP_STOPS.map((stop) => (
                     <option key={stop} value={stop} className="bg-slate-900 text-white">
                       {stop}
                     </option>
@@ -613,7 +613,7 @@ export const ConductorScanner: React.FC = () => {
                 </button>
               </div>
               <div className="flex flex-wrap gap-1.5">
-                {ROUTE_138_STOPS.filter((s) => s !== fromStop)
+                {ROUTE_NCP_STOPS.filter((s) => s !== fromStop)
                   .slice(0, 4)
                   .map((stop) => {
                     const f = calculateFare(fromStop, stop)
@@ -805,7 +805,7 @@ export const ConductorScanner: React.FC = () => {
                 <div>
                   <div className="text-sm font-bold text-slate-900">{lastScan.passengerId}</div>
                   <div className="text-xs text-blue-700 font-semibold">
-                    {lastScan.fromStop || 'Pettah (Fort)'} → {lastScan.toStop || 'Malabe'}
+                    {lastScan.fromStop || 'Anuradhapura (New Town)'} → {lastScan.toStop || 'Kaduruwela (Polonnaruwa Central)'}
                   </div>
                   <div className="text-[10px] text-slate-400">
                     QR validated • {lastScan.scanTime}
@@ -932,7 +932,7 @@ export const ConductorScanner: React.FC = () => {
                     <div>
                       <div className="text-xs font-bold text-slate-900">{item.passengerId}</div>
                       <div className="text-[11px] font-semibold text-blue-700">
-                        {item.fromStop || 'Pettah (Fort)'} → {item.toStop || 'Malabe'}
+                        {item.fromStop || 'Anuradhapura (New Town)'} → {item.toStop || 'Kaduruwela (Polonnaruwa Central)'}
                       </div>
                       <div className="text-[10px] text-slate-500 flex items-center gap-1.5 mt-0.5">
                         <Clock className="w-3 h-3 text-slate-400" />
@@ -991,11 +991,11 @@ export const ConductorScanner: React.FC = () => {
                 </div>
                 <div className="flex justify-between py-1.5 border-b border-slate-50">
                   <span className="text-slate-500 font-medium">Assigned Bus</span>
-                  <span className="font-bold text-slate-900">NB-4521</span>
+                  <span className="font-bold text-slate-900">NC NB-4521</span>
                 </div>
                 <div className="flex justify-between py-1.5 border-b border-slate-50">
                   <span className="text-slate-500 font-medium">Route</span>
-                  <span className="font-bold text-slate-900">138 (Colombo - Kaduwela)</span>
+                  <span className="font-bold text-slate-900">Route 81 (Anuradhapura - Polonnaruwa)</span>
                 </div>
                 <div className="flex justify-between py-1.5">
                   <span className="text-slate-500 font-medium">Shift Status</span>
