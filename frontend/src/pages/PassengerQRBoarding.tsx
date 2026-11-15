@@ -13,7 +13,8 @@ import {
   ShieldCheck,
   Check,
   Zap,
-  ZapOff
+  ZapOff,
+  ChevronDown
 } from 'lucide-react'
 
 // Official North Central Province Corridor Halts (Route 81: Anuradhapura - Polonnaruwa)
@@ -518,6 +519,30 @@ export const PassengerQRBoarding: React.FC = () => {
                     </p>
                   </div>
 
+                  {/* Passenger Destination Selector for Scan to Board */}
+                  <div className="bg-white border border-slate-200 rounded-2xl p-3.5 shadow-xs text-left space-y-2">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-bold text-slate-700">Your Intended Destination</span>
+                      <span className="text-[11px] font-semibold text-blue-600">
+                        Fare: Rs. {calculateFare(selectedFrom, selectedTo)}
+                      </span>
+                    </div>
+                    <div className="relative">
+                      <select
+                        value={selectedTo}
+                        onChange={(e) => setSelectedTo(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-200 text-xs font-semibold text-slate-800 rounded-xl px-3 py-2.5 appearance-none focus:outline-none focus:border-blue-500 pr-8"
+                      >
+                        {ROUTE_NCP_STOPS.map((stop) => (
+                          <option key={stop} value={stop} disabled={stop === selectedFrom}>
+                            {stop} {stop === selectedFrom ? '(Current Boarding)' : ''}
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    </div>
+                  </div>
+
                   {/* Enter QR Code Manually Button */}
                   <button
                     type="button"
@@ -573,11 +598,13 @@ export const PassengerQRBoarding: React.FC = () => {
 
                 {/* Dynamic QR Code Display */}
                 <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200/80 inline-block shadow-inner">
-                  <img
-                    src="/passenger-qr.png"
-                    alt="Passenger Boarding QR"
-                    className="w-48 h-48 bg-white p-2 rounded-xl shadow-xs border border-slate-200 object-contain mx-auto"
-                  />
+                  <div className="w-52 h-52 bg-white p-3 rounded-xl shadow-xs border border-slate-200 mx-auto flex items-center justify-center">
+                    <img
+                      src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAUoAAAFKAQAAAABTUiuoAAACNElEQVR4nO2aS6rkMAxFj14CPXSgFpTacu8gWUrvIBk+cLg9sJzPpKkaVMfw5EFI8BlcEIqvZJl4cc1fr5IQaKCBfsFqvp5rj38Om5kNULf6RrQGSidJEqRvgyRpohPjAoySpKUZrYGCZ8/aYzZsxrhspmlPtefHBQT6PpoyJa1m628REOi/1zUq3e4Qu2yk/B8EBPp2tDxI6yPDajAuDxh/9xmSgPVzAgJ9M1qbHd82Lo98+p7Le/cxAYG+F610FMgZYDOVt5Q51863aw0UaenEWBy8pKlYDYrf0JQkxqWTptu1BoqkjMdjj4wWD6OmWn5FtBpAqYWxxOEJS/CocYtoNYRuBquZpuRZxjz4ttnQieLlm9D649H1Vzm3vE/IZoz6rr6wRPCjAgJ9eZXjyc8oNxi1O+gNRN+9XWugVEdBjZHkfgOAURmIc6sN1B380SIcld15nHvwEa0m0EtuLYcJvFr7yK02UHQszy1PJt9PGS+6btca6Cmtah5RTWDaf4fxJ2wDPeeWasjY75NLWpW327UG6rm1l1XVwR9XW7u/v11roNfc2r2F3CJWxxi51QRacwtOrV3//y1dnFttoRwti1pq7Y8lurpNoj7zRCdYe8oUzVyGCqOr2w5aexm11Kol8rl3GOdWk+hqpgmwJz6ry/jHBw1b0/oj0cvMU8p9aV7MQ5fNJzT23du1BvoFbGXWvczqPk/3W53KMPwzcqsN9DrzJPDrfu8T1q1wGYEG+ib6F5217WHrRC1BAAAAAElFTkSuQmCC"
+                      alt="Passenger QR Pass"
+                      className="w-full h-full object-contain"
+                    />
+                  </div>
                   <div className="text-[11px] font-mono text-slate-500 mt-2 font-semibold">
                     {passengerToken}
                   </div>
