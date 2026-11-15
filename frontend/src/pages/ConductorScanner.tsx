@@ -429,7 +429,28 @@ export const ConductorScanner: React.FC = () => {
               )}
 
               {/* Laser Scanning Animation Bar - Moving Smoothly Up and Down */}
-              <div className="animate-scan-laser-sweep z-10 pointer-events-none" />
+              <div
+                className="absolute left-2 right-2 h-1 bg-cyan-400 rounded-full shadow-[0_0_15px_3px_#38bdf8] pointer-events-none z-30"
+                style={{
+                  animation: 'laserScanUpDown 2.2s ease-in-out infinite'
+                }}
+              />
+              <style>{`
+                @keyframes laserScanUpDown {
+                  0% {
+                    top: 8px;
+                    opacity: 0.7;
+                  }
+                  50% {
+                    top: calc(100% - 12px);
+                    opacity: 1;
+                  }
+                  100% {
+                    top: 8px;
+                    opacity: 0.7;
+                  }
+                }
+              `}</style>
             </div>
 
             {/* Frame Helper Text */}
