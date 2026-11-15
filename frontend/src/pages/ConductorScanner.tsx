@@ -173,27 +173,59 @@ export const ConductorScanner: React.FC = () => {
     window.addEventListener('offline', handleOffline)
 
     let animationFrameId: number
+    let lastProcessedTime = 0
 
-    const scanFrame = () => {
+    const scanFrame = (timestamp: number) => {
       const video = videoRef.current
       const canvas = canvasRef.current
 
-      if (video && video.readyState === video.HAVE_ENOUGH_DATA && canvas) {
+      // Process at most once every 90ms for optimal accuracy and zero CPU lag
+      if (
+        video &&
+        video.readyState === video.HAVE_ENOUGH_DATA &&
+        canvas &&
+        timestamp - lastProcessedTime > 90
+      ) {
+        lastProcessedTime = timestamp
         const ctx = canvas.getContext('2d', { willReadFrequently: true })
-        if (ctx) {
-          canvas.width = video.videoWidth
-          canvas.height = video.videoHeight
-          ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
 
-          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
-          const code = jsQR(imageData.data, imageData.width, imageData.height, {
-            inversionAttempts: 'dontInvert'
+        if (ctx) {
+          const vw = video.videoWidth
+          const vh = video.videoHeight
+
+          // 1. First priority: Scan the center crop directly inside the viewfinder frame
+          const cropDim = Math.floor(Math.min(vw, vh) * 0.72)
+          const cropX = Math.floor((vw - cropDim) / 2)
+          const cropY = Math.floor((vh - cropDim) / 2)
+
+          canvas.width = 480
+          canvas.height = 480
+          ctx.drawImage(video, cropX, cropY, cropDim, cropDim, 0, 0, 480, 480)
+
+          let imageData = ctx.getImageData(0, 0, 480, 480)
+          let code = jsQR(imageData.data, 480, 480, {
+            inversionAttempts: 'attemptBoth'
           })
+
+          // 2. Fallback: If not found in center crop, scan the whole frame downscaled
+          if (!code) {
+            const scale = Math.min(1, 540 / Math.max(vw, vh))
+            const fw = Math.floor(vw * scale)
+            const fh = Math.floor(vh * scale)
+            canvas.width = fw
+            canvas.height = fh
+            ctx.drawImage(video, 0, 0, fw, fh)
+
+            imageData = ctx.getImageData(0, 0, fw, fh)
+            code = jsQR(imageData.data, fw, fh, {
+              inversionAttempts: 'attemptBoth'
+            })
+          }
 
           if (code && code.data) {
             const now = Date.now()
-            // 3-second debounce between scans
-            if (now - lastScannedTimeRef.current > 3000) {
+            // 2.5-second debounce between scans
+            if (now - lastScannedTimeRef.current > 2500) {
               lastScannedTimeRef.current = now
               handleProcessScan(code.data)
             }
