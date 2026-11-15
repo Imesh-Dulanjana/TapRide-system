@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import {
   LayoutDashboard,
   Radio,
@@ -15,9 +15,11 @@ import {
   Bell,
   Download,
   ChevronDown,
-  CheckCircle2,
   Clock,
-  X
+  X,
+  MapPin,
+  ShieldAlert,
+  AlertTriangle
 } from 'lucide-react'
 
 interface ReportRecord {
@@ -31,7 +33,7 @@ interface ReportRecord {
   reportType: string
 }
 
-interface OperatorApproval {
+interface OperatorRecord {
   id: string
   name: string
   role: 'Bus Owner' | 'Conductor' | 'Fleet Operator'
@@ -39,112 +41,104 @@ interface OperatorApproval {
   depot: string
   route: string
   submissionDate: string
-  status: 'PENDING' | 'APPROVED' | 'REJECTED'
+  status: 'ACTIVE' | 'PENDING' | 'SUSPENDED'
   nic: string
   contact: string
 }
 
+interface PassengerRecord {
+  id: string
+  name: string
+  nic: string
+  phone: string
+  balance: number
+  tripsTaken: number
+  status: 'ACTIVE' | 'SUSPENDED' | 'FLAGGED'
+}
+
+interface LiveBus {
+  plate: string
+  driver: string
+  conductor: string
+  currentHalt: string
+  speed: string
+  passengers: number
+  status: 'ON ROUTE' | 'AT TERMINAL' | 'SUSPENDED'
+}
+
+interface TransactionRecord {
+  id: string
+  passenger: string
+  vehicle: string
+  segment: string
+  fare: number
+  time: string
+  status: 'SETTLED' | 'REFUNDED' | 'DISPUTED'
+}
+
 export const AdminReportsManagement: React.FC = () => {
-  // Navigation / active view
-  const [activeTab, setActiveTab] = useState<'reports' | 'approvals'>('reports')
+  // Navigation
   const [activeMenu, setActiveMenu] = useState<string>('Reports')
 
-  // Search and filters
+  // Search
   const [searchQuery, setSearchQuery] = useState<string>('')
+
+  // Report generation state
   const [selectedReportType, setSelectedReportType] = useState<string>('Revenue & Transactions')
   const [dateRange, setDateRange] = useState<string>('Aug 1, 2026 – Aug 29, 2026')
   const [selectedFormat, setSelectedFormat] = useState<'PDF' | 'XLSX' | 'CSV'>('PDF')
   const [isGenerating, setIsGenerating] = useState<boolean>(false)
-  const [generationFeedback, setGenerationFeedback] = useState<string | null>(null)
+  const [adminFeedback, setAdminFeedback] = useState<string | null>(null)
 
-  // Notification modal
+  // Top notifications modal
   const [showNotifications, setShowNotifications] = useState<boolean>(false)
 
-  // Document modal for approvals
-  const [selectedApproval, setSelectedApproval] = useState<OperatorApproval | null>(null)
+  // Confirmation dialog modal state for admin critical actions
+  const [confirmDialog, setConfirmDialog] = useState<{
+    isOpen: boolean
+    title: string
+    message: string
+    actionLabel: string
+    isDestructive?: boolean
+    onConfirm: () => void
+  } | null>(null)
 
-  // Reports data
-  const [reports, setReports] = useState<ReportRecord[]>([
-    {
-      id: 'REP-001',
-      title: 'Daily Revenue Report',
-      generatedBy: 'System Admin',
-      date: 'Aug 29, 2026',
-      format: 'PDF',
-      status: 'READY',
-      fileSize: '1.4 MB',
-      reportType: 'Revenue & Transactions'
-    },
-    {
-      id: 'REP-002',
-      title: 'Settlement Summary',
-      generatedBy: 'System Admin',
-      date: 'Aug 28, 2026',
-      format: 'PDF',
-      status: 'READY',
-      fileSize: '890 KB',
-      reportType: 'Settlement & Payouts'
-    },
-    {
-      id: 'REP-003',
-      title: 'Fleet Performance Report',
-      generatedBy: 'System Admin',
-      date: 'Aug 28, 2026',
-      format: 'XLSX',
-      status: 'READY',
-      fileSize: '2.1 MB',
-      reportType: 'Fleet Operations'
-    },
-    {
-      id: 'REP-004',
-      title: 'Transaction Audit',
-      generatedBy: 'System Admin',
-      date: 'Aug 27, 2026',
-      format: 'PDF',
-      status: 'READY',
-      fileSize: '3.6 MB',
-      reportType: 'Revenue & Transactions'
-    },
-    {
-      id: 'REP-005',
-      title: 'Route 81 Conductor Log',
-      generatedBy: 'System Admin',
-      date: 'Aug 26, 2026',
-      format: 'CSV',
-      status: 'READY',
-      fileSize: '540 KB',
-      reportType: 'Operations'
-    }
-  ])
+  // Live dynamic telemetry and metrics state
+  const [totalRevenue, setTotalRevenue] = useState<number>(38740200)
+  const [totalTransactions, setTotalTransactions] = useState<number>(284921)
+  const activeFleetCount = 24
 
-  // Operator Approvals data (NCP Anuradhapura - Polonnaruwa corridor)
-  const [approvals, setApprovals] = useState<OperatorApproval[]>([
+  // Live simulated stream toggle
+  const [liveStreamEnabled, setLiveStreamEnabled] = useState<boolean>(true)
+
+  // Operator and User state (fully editable & suspendable by TapRide Admin)
+  const [operators, setOperators] = useState<OperatorRecord[]>([
     {
-      id: 'APP-8101',
+      id: 'OP-8101',
       name: 'Sunil Wickramasinghe',
       role: 'Bus Owner',
       regNumber: 'NC-6284',
       depot: 'Anuradhapura Central Depot',
       route: 'Route 81 (Anuradhapura - Polonnaruwa)',
       submissionDate: 'Aug 28, 2026',
-      status: 'PENDING',
+      status: 'ACTIVE',
       nic: '197812903841',
       contact: '+94 77 123 4567'
     },
     {
-      id: 'APP-8102',
+      id: 'OP-8102',
       name: 'Mahesh Bandara',
       role: 'Conductor',
       regNumber: 'COND-NCP-402',
       depot: 'Polonnaruwa Kaduruwela Depot',
       route: 'Route 81 (Kaduruwela - Anuradhapura)',
       submissionDate: 'Aug 27, 2026',
-      status: 'PENDING',
+      status: 'ACTIVE',
       nic: '199234819022',
       contact: '+94 71 987 6543'
     },
     {
-      id: 'APP-8103',
+      id: 'OP-8103',
       name: 'Rajarata Express Logistics',
       role: 'Fleet Operator',
       regNumber: 'FLT-81-009',
@@ -154,19 +148,237 @@ export const AdminReportsManagement: React.FC = () => {
       status: 'PENDING',
       nic: 'PV00293819',
       contact: '+94 25 222 3456'
+    },
+    {
+      id: 'OP-8104',
+      name: 'Dharmadasa Perera',
+      role: 'Conductor',
+      regNumber: 'COND-NCP-119',
+      depot: 'Kekirawa Town Station',
+      route: 'Route 81 Corridor',
+      submissionDate: 'Aug 24, 2026',
+      status: 'SUSPENDED',
+      nic: '198291029384',
+      contact: '+94 72 334 9912'
     }
   ])
 
-  // Handle report generation
+  // Passengers list data (TapRide Admin can suspend or flag accounts)
+  const [passengers, setPassengers] = useState<PassengerRecord[]>([
+    { id: 'TR-2048', name: 'Imesh Dulanjana', nic: '199920194820', phone: '+94 77 912 3456', balance: 850, tripsTaken: 48, status: 'ACTIVE' },
+    { id: 'TR-1874', name: 'Nalaka Senanayake', nic: '198539201928', phone: '+94 71 445 9921', balance: 320, tripsTaken: 22, status: 'ACTIVE' },
+    { id: 'TR-3091', name: 'Kumari Jayasinghe', nic: '199274819201', phone: '+94 76 881 2049', balance: 140, tripsTaken: 15, status: 'ACTIVE' },
+    { id: 'TR-4102', name: 'Dhammika Silva', nic: '197410293847', phone: '+94 70 334 1182', balance: 0, tripsTaken: 3, status: 'FLAGGED' },
+    { id: 'TR-5519', name: 'Rohan Wickrama', nic: '198810293819', phone: '+94 78 221 0049', balance: -45, tripsTaken: 12, status: 'SUSPENDED' }
+  ])
+
+  // Live fleet buses (Admin can suspend vehicle or change dispatch)
+  const [liveBuses, setLiveBuses] = useState<LiveBus[]>([
+    { plate: 'NC-4521', driver: 'K. Somapala', conductor: 'A. Perera', currentHalt: 'Habarana Junction', speed: '52 km/h', passengers: 42, status: 'ON ROUTE' },
+    { plate: 'NC-6284', driver: 'P. Jayatissa', conductor: 'M. Bandara', currentHalt: 'Minneriya', speed: '48 km/h', passengers: 38, status: 'ON ROUTE' },
+    { plate: 'NC-9912', driver: 'R. Dharmasena', conductor: 'S. Alwis', currentHalt: 'Anuradhapura Terminal', speed: '0 km/h', passengers: 0, status: 'AT TERMINAL' },
+    { plate: 'NC-1830', driver: 'W. Karunaratne', conductor: 'T. Dulanjana', currentHalt: 'Kaduruwela Station', speed: '0 km/h', passengers: 14, status: 'ON ROUTE' }
+  ])
+
+  // Transactions list
+  const [transactions, setTransactions] = useState<TransactionRecord[]>([
+    { id: 'TX-910283', passenger: 'Passenger TR-2048', vehicle: 'NC-4521', segment: 'Anuradhapura → Kaduruwela', fare: 220, time: '11:14 PM', status: 'SETTLED' },
+    { id: 'TX-910282', passenger: 'Passenger TR-1874', vehicle: 'NC-6284', segment: 'Minneriya → Polonnaruwa Old Town', fare: 60, time: '11:10 PM', status: 'SETTLED' },
+    { id: 'TX-910281', passenger: 'Passenger TR-3091', vehicle: 'NC-4521', segment: 'Kekirawa → Habarana Junction', fare: 45, time: '11:02 PM', status: 'SETTLED' },
+    { id: 'TX-910280', passenger: 'Passenger TR-5519', vehicle: 'NC-1830', segment: 'Mihintale → Maradankadawala', fare: 30, time: '10:55 PM', status: 'DISPUTED' }
+  ])
+
+  // Reports list
+  const [reports, setReports] = useState<ReportRecord[]>([
+    { id: 'REP-001', title: 'Daily Revenue Report', generatedBy: 'System Admin', date: 'Aug 29, 2026', format: 'PDF', status: 'READY', fileSize: '1.4 MB', reportType: 'Revenue & Transactions' },
+    { id: 'REP-002', title: 'Settlement Summary', generatedBy: 'System Admin', date: 'Aug 28, 2026', format: 'PDF', status: 'READY', fileSize: '890 KB', reportType: 'Settlement & Payouts' },
+    { id: 'REP-003', title: 'Fleet Performance Report', generatedBy: 'System Admin', date: 'Aug 28, 2026', format: 'XLSX', status: 'READY', fileSize: '2.1 MB', reportType: 'Fleet Operations' },
+    { id: 'REP-004', title: 'Transaction Audit', generatedBy: 'System Admin', date: 'Aug 27, 2026', format: 'PDF', status: 'READY', fileSize: '3.6 MB', reportType: 'Revenue & Transactions' },
+    { id: 'REP-005', title: 'Route 81 Conductor Log', generatedBy: 'System Admin', date: 'Aug 26, 2026', format: 'CSV', status: 'READY', fileSize: '540 KB', reportType: 'Operations' }
+  ])
+
+  // Route 81 stages data
+  const [routeStages, setRouteStages] = useState([
+    { stage: 1, name: 'Anuradhapura (New Town)', distance: '0.0 km', baseFare: 30 },
+    { stage: 2, name: 'Mihintale Junction', distance: '12.4 km', baseFare: 45 },
+    { stage: 3, name: 'Maradankadawala', distance: '28.1 km', baseFare: 60 },
+    { stage: 4, name: 'Kekirawa Town', distance: '41.6 km', baseFare: 80 },
+    { stage: 5, name: 'Habarana Junction', distance: '63.2 km', baseFare: 105 },
+    { stage: 6, name: 'Minneriya', distance: '78.5 km', baseFare: 130 },
+    { stage: 7, name: 'Hingurakgoda', distance: '89.0 km', baseFare: 160 },
+    { stage: 8, name: 'Giritale', distance: '98.4 km', baseFare: 190 },
+    { stage: 9, name: 'Polonnaruwa Old Town', distance: '109.1 km', baseFare: 220 },
+    { stage: 10, name: 'Kaduruwela (Polonnaruwa Central)', distance: '114.8 km', baseFare: 220 }
+  ])
+
+  // System Configuration (Admin controlled)
+  const [provincialRate, setProvincialRate] = useState<string>('22.00')
+  const [platformFee, setPlatformFee] = useState<string>('3.0')
+  const [emergencyLockdown, setEmergencyLockdown] = useState<boolean>(false)
+
+  // Real-time live data incoming pulse (Simulating live bus trips across Route 81)
+  useEffect(() => {
+    if (!liveStreamEnabled) return
+
+    const interval = setInterval(() => {
+      // Simulate live fare incoming
+      const randomFare = [30, 45, 60, 80, 105, 130, 160, 190, 220][Math.floor(Math.random() * 9)]
+      setTotalRevenue((prev) => prev + randomFare)
+      setTotalTransactions((prev) => prev + 1)
+
+      // Random speed fluctuations on active buses
+      setLiveBuses((prev) =>
+        prev.map((bus) => {
+          if (bus.status === 'ON ROUTE') {
+            const nextSpeed = Math.floor(40 + Math.random() * 20)
+            return { ...bus, speed: `${nextSpeed} km/h` }
+          }
+          return bus
+        })
+      )
+    }, 4500)
+
+    return () => clearInterval(interval)
+  }, [liveStreamEnabled])
+
+  // Admin Actions: Suspend or Activate Passenger with Confirmation
+  const promptTogglePassengerStatus = (passenger: PassengerRecord) => {
+    const isSuspending = passenger.status === 'ACTIVE'
+    setConfirmDialog({
+      isOpen: true,
+      title: isSuspending ? 'Suspend Passenger Account' : 'Reactivate Passenger Account',
+      message: isSuspending
+        ? `Are you sure you want to suspend passenger ${passenger.name} (${passenger.id})? This will immediately lock digital QR boarding access along Route 81.`
+        : `Reactivate transit privileges for passenger ${passenger.name} (${passenger.id})?`,
+      actionLabel: isSuspending ? 'Suspend Passenger' : 'Reactivate Passenger',
+      isDestructive: isSuspending,
+      onConfirm: () => {
+        setPassengers((prev) =>
+          prev.map((p) => {
+            if (p.id === passenger.id) {
+              const nextStatus = p.status === 'ACTIVE' ? 'SUSPENDED' : 'ACTIVE'
+              setAdminFeedback(`Admin action: Passenger ${p.id} (${p.name}) status changed to ${nextStatus}.`)
+              setTimeout(() => setAdminFeedback(null), 3500)
+              return { ...p, status: nextStatus }
+            }
+            return p
+          })
+        )
+        setConfirmDialog(null)
+      }
+    })
+  }
+
+  // Admin Actions: Suspend or Activate Bus Owner / Conductor with Confirmation
+  const promptToggleOperatorStatus = (operator: OperatorRecord) => {
+    const isSuspending = operator.status === 'ACTIVE'
+    setConfirmDialog({
+      isOpen: true,
+      title: isSuspending ? `Suspend ${operator.role}` : `Reinstate ${operator.role}`,
+      message: isSuspending
+        ? `Are you sure you want to suspend ${operator.role} ${operator.name} (${operator.regNumber})? This will halt dispatch rights and freeze automated settlement disbursements.`
+        : `Reinstate operating permits and corridor rights for ${operator.role} ${operator.name} (${operator.regNumber})?`,
+      actionLabel: isSuspending ? 'Confirm Suspension' : 'Confirm Reinstatement',
+      isDestructive: isSuspending,
+      onConfirm: () => {
+        setOperators((prev) =>
+          prev.map((op) => {
+            if (op.id === operator.id) {
+              const nextStatus = op.status === 'ACTIVE' ? 'SUSPENDED' : 'ACTIVE'
+              setAdminFeedback(`Admin action: ${op.role} ${op.name} (${op.regNumber}) set to ${nextStatus}.`)
+              setTimeout(() => setAdminFeedback(null), 3500)
+              return { ...op, status: nextStatus }
+            }
+            return op
+          })
+        )
+        setConfirmDialog(null)
+      }
+    })
+  }
+
+  // Admin Actions: Suspend Vehicle with Confirmation
+  const promptToggleBusStatus = (bus: LiveBus) => {
+    const isSuspending = bus.status !== 'SUSPENDED'
+    setConfirmDialog({
+      isOpen: true,
+      title: isSuspending ? 'Ground / Suspend Vehicle' : 'Return Vehicle to Service',
+      message: isSuspending
+        ? `Are you sure you want to suspend bus plate ${bus.plate} currently at ${bus.currentHalt}? Conductor terminal scanning on this bus will be immediately frozen.`
+        : `Authorize vehicle ${bus.plate} to resume revenue operations along Route 81?`,
+      actionLabel: isSuspending ? 'Suspend Bus' : 'Authorize Bus',
+      isDestructive: isSuspending,
+      onConfirm: () => {
+        setLiveBuses((prev) =>
+          prev.map((b) => {
+            if (b.plate === bus.plate) {
+              const nextStatus = b.status === 'SUSPENDED' ? 'ON ROUTE' : 'SUSPENDED'
+              setAdminFeedback(`Admin action: Vehicle ${b.plate} status changed to ${nextStatus}.`)
+              setTimeout(() => setAdminFeedback(null), 3500)
+              return { ...b, status: nextStatus, speed: nextStatus === 'SUSPENDED' ? '0 km/h' : '45 km/h' }
+            }
+            return b
+          })
+        )
+        setConfirmDialog(null)
+      }
+    })
+  }
+
+  // Admin Actions: Refund or Dispute Transaction with Confirmation
+  const promptTransactionAction = (txId: string, action: 'REFUNDED' | 'SETTLED', fare: number) => {
+    setConfirmDialog({
+      isOpen: true,
+      title: action === 'REFUNDED' ? 'Authorize Passenger Fare Refund' : 'Dismiss Dispute',
+      message: action === 'REFUNDED'
+        ? `Confirm refund of Rs. ${fare.toFixed(2)} for transaction ${txId}? This will reverse the fare from operator settlement totals.`
+        : `Dismiss disputed charge on transaction ${txId} and mark as settled?`,
+      actionLabel: action === 'REFUNDED' ? 'Process Refund' : 'Dismiss Dispute',
+      isDestructive: action === 'REFUNDED',
+      onConfirm: () => {
+        setTransactions((prev) =>
+          prev.map((tx) => (tx.id === txId ? { ...tx, status: action } : tx))
+        )
+        setAdminFeedback(`Admin action: Transaction ${txId} marked as ${action}.`)
+        setTimeout(() => setAdminFeedback(null), 3500)
+        setConfirmDialog(null)
+      }
+    })
+  }
+
+  // Admin Actions: Edit Route Stage Fare with Confirmation
+  const promptEditStageFare = (stageObj: { stage: number; name: string; baseFare: number }) => {
+    const enteredFare = prompt(`Enter new gazetted fare for Stage ${stageObj.stage} - ${stageObj.name} (Rs.):`, String(stageObj.baseFare))
+    if (!enteredFare || isNaN(Number(enteredFare)) || Number(enteredFare) <= 0) return
+
+    const newFare = Number(enteredFare)
+    setConfirmDialog({
+      isOpen: true,
+      title: `Update Tariff for Stage ${stageObj.stage}`,
+      message: `Are you sure you want to update Stage ${stageObj.stage} (${stageObj.name}) from Rs. ${stageObj.baseFare} to Rs. ${newFare}? This will affect all live QR ticket calculations along Route 81 immediately.`,
+      actionLabel: 'Confirm Fare Change',
+      isDestructive: false,
+      onConfirm: () => {
+        setRouteStages((prev) =>
+          prev.map((s) => (s.stage === stageObj.stage ? { ...s, baseFare: newFare } : s))
+        )
+        setAdminFeedback(`Admin action: Stage ${stageObj.stage} (${stageObj.name}) fare updated to Rs. ${newFare}.`)
+        setTimeout(() => setAdminFeedback(null), 3500)
+        setConfirmDialog(null)
+      }
+    })
+  }
+
+  // Report generation handler
   const handleGenerateReport = () => {
     setIsGenerating(true)
-    setGenerationFeedback(null)
+    setAdminFeedback(null)
 
     setTimeout(() => {
       const newReport: ReportRecord = {
         id: `REP-${String(reports.length + 1).padStart(3, '0')}`,
         title: `${selectedReportType} (${selectedFormat})`,
-        generatedBy: 'System Admin',
+        generatedBy: 'TapRide Super Admin',
         date: 'Aug 29, 2026',
         format: selectedFormat,
         status: 'READY',
@@ -175,17 +387,14 @@ export const AdminReportsManagement: React.FC = () => {
       }
       setReports([newReport, ...reports])
       setIsGenerating(false)
-      setGenerationFeedback(`Successfully generated ${newReport.title}. Ready for download.`)
-
-      setTimeout(() => {
-        setGenerationFeedback(null)
-      }, 4000)
-    }, 1000)
+      setAdminFeedback(`Successfully generated ${newReport.title}. Ready for download.`)
+      setTimeout(() => setAdminFeedback(null), 4000)
+    }, 900)
   }
 
-  // Handle simulated report download
+  // Download simulation
   const handleDownload = (report: ReportRecord) => {
-    const dummyContent = `TapRide Admin Portal Report\nTitle: ${report.title}\nReport ID: ${report.id}\nDate: ${report.date}\nGenerated By: ${report.generatedBy}\nFormat: ${report.format}\nStatus: Verified\nCoverage: North Central Province (Route 81: Anuradhapura - Polonnaruwa)\n`
+    const dummyContent = `TapRide Central Authority Audit Log\nReport: ${report.title}\nReport ID: ${report.id}\nIssued by: TapRide Super Admin\nScope: Route 81 (Anuradhapura - Polonnaruwa)\nStatus: Verified\n`
     const blob = new Blob([dummyContent], { type: 'text/plain' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -197,17 +406,7 @@ export const AdminReportsManagement: React.FC = () => {
     URL.revokeObjectURL(url)
   }
 
-  // Handle operator status change
-  const handleApprovalAction = (id: string, newStatus: 'APPROVED' | 'REJECTED') => {
-    setApprovals((prev) =>
-      prev.map((app) => (app.id === id ? { ...app, status: newStatus } : app))
-    )
-    if (selectedApproval && selectedApproval.id === id) {
-      setSelectedApproval((prev) => (prev ? { ...prev, status: newStatus } : null))
-    }
-  }
-
-  const pendingApprovalsCount = approvals.filter((a) => a.status === 'PENDING').length
+  const pendingApprovalsCount = operators.filter((o) => o.status === 'PENDING').length
 
   // Filtered reports for search
   const filteredReports = reports.filter(
@@ -219,16 +418,20 @@ export const AdminReportsManagement: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-slate-50 flex font-sans text-slate-800">
-      {/* LEFT SIDEBAR */}
+      {/* LEFT SIDEBAR - TAPRIDE CENTRAL ADMIN CONTROL */}
       <aside className="w-64 bg-white border-r border-slate-200 flex flex-col shrink-0 min-h-screen">
         {/* Brand Header */}
-        <div className="p-6 border-b border-slate-100 flex items-center gap-3">
-          <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white font-bold text-xl shadow-sm">
-            T
-          </div>
-          <div>
-            <h1 className="font-bold text-slate-900 leading-tight text-base tracking-tight">TapRide</h1>
-            <p className="text-xs text-slate-400 font-medium">Admin Portal</p>
+        <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <img
+              src="/logo.jpeg"
+              alt="TapRide Logo"
+              className="w-10 h-10 rounded-xl object-contain shadow-sm border border-slate-100"
+            />
+            <div>
+              <h1 className="font-bold text-slate-900 leading-tight text-base tracking-tight">TapRide</h1>
+              <p className="text-xs text-blue-600 font-semibold uppercase tracking-wider text-[10px]">Super Admin Portal</p>
+            </div>
           </div>
         </div>
 
@@ -242,13 +445,10 @@ export const AdminReportsManagement: React.FC = () => {
             <nav className="space-y-1">
               <button
                 type="button"
-                onClick={() => {
-                  setActiveMenu('Dashboard')
-                  setActiveTab('reports')
-                }}
+                onClick={() => setActiveMenu('Dashboard')}
                 className={`w-full flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
-                  activeMenu === 'Dashboard' && activeTab === 'reports'
-                    ? 'bg-blue-50 text-blue-600'
+                  activeMenu === 'Dashboard'
+                    ? 'bg-blue-50 text-blue-600 font-semibold'
                     : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
                 }`}
               >
@@ -261,7 +461,7 @@ export const AdminReportsManagement: React.FC = () => {
                 onClick={() => setActiveMenu('Live Operations')}
                 className={`w-full flex items-center justify-between px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
                   activeMenu === 'Live Operations'
-                    ? 'bg-blue-50 text-blue-600'
+                    ? 'bg-blue-50 text-blue-600 font-semibold'
                     : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
                 }`}
               >
@@ -269,8 +469,9 @@ export const AdminReportsManagement: React.FC = () => {
                   <Radio className="w-4 h-4 text-slate-400" />
                   <span>Live Operations</span>
                 </div>
-                <span className="bg-rose-500 text-white text-[11px] font-semibold px-2 py-0.5 rounded-full">
-                  24
+                <span className="bg-rose-500 text-white text-[11px] font-semibold px-2 py-0.5 rounded-full flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
+                  {activeFleetCount}
                 </span>
               </button>
             </nav>
@@ -279,31 +480,33 @@ export const AdminReportsManagement: React.FC = () => {
           {/* MANAGEMENT */}
           <div>
             <p className="px-3 text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-2">
-              Management
+              Authority Controls
             </p>
             <nav className="space-y-1">
               <button
                 type="button"
                 onClick={() => setActiveMenu('Passengers')}
-                className={`w-full flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
+                className={`w-full flex items-center justify-between px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
                   activeMenu === 'Passengers'
-                    ? 'bg-blue-50 text-blue-600'
+                    ? 'bg-blue-50 text-blue-600 font-semibold'
                     : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
                 }`}
               >
-                <Users className="w-4 h-4 text-slate-400" />
-                <span>Passengers</span>
+                <div className="flex items-center gap-3">
+                  <Users className="w-4 h-4 text-slate-400" />
+                  <span>Passengers</span>
+                </div>
+                <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-mono">
+                  {passengers.length}
+                </span>
               </button>
 
               <button
                 type="button"
-                onClick={() => {
-                  setActiveMenu('Bus Owners')
-                  setActiveTab('approvals')
-                }}
+                onClick={() => setActiveMenu('Bus Owners')}
                 className={`w-full flex items-center justify-between px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
-                  activeMenu === 'Bus Owners' && activeTab === 'approvals'
-                    ? 'bg-blue-50 text-blue-600'
+                  activeMenu === 'Bus Owners'
+                    ? 'bg-blue-50 text-blue-600 font-semibold'
                     : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
                 }`}
               >
@@ -313,7 +516,7 @@ export const AdminReportsManagement: React.FC = () => {
                 </div>
                 {pendingApprovalsCount > 0 && (
                   <span className="bg-amber-100 text-amber-700 text-[10px] font-bold px-1.5 py-0.5 rounded-full">
-                    {pendingApprovalsCount}
+                    {pendingApprovalsCount} new
                   </span>
                 )}
               </button>
@@ -323,7 +526,7 @@ export const AdminReportsManagement: React.FC = () => {
                 onClick={() => setActiveMenu('Fleet Management')}
                 className={`w-full flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
                   activeMenu === 'Fleet Management'
-                    ? 'bg-blue-50 text-blue-600'
+                    ? 'bg-blue-50 text-blue-600 font-semibold'
                     : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
                 }`}
               >
@@ -333,13 +536,10 @@ export const AdminReportsManagement: React.FC = () => {
 
               <button
                 type="button"
-                onClick={() => {
-                  setActiveMenu('Conductors')
-                  setActiveTab('approvals')
-                }}
+                onClick={() => setActiveMenu('Conductors')}
                 className={`w-full flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
                   activeMenu === 'Conductors'
-                    ? 'bg-blue-50 text-blue-600'
+                    ? 'bg-blue-50 text-blue-600 font-semibold'
                     : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
                 }`}
               >
@@ -352,7 +552,7 @@ export const AdminReportsManagement: React.FC = () => {
                 onClick={() => setActiveMenu('Routes & Fares')}
                 className={`w-full flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
                   activeMenu === 'Routes & Fares'
-                    ? 'bg-blue-50 text-blue-600'
+                    ? 'bg-blue-50 text-blue-600 font-semibold'
                     : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
                 }`}
               >
@@ -365,7 +565,7 @@ export const AdminReportsManagement: React.FC = () => {
           {/* FINANCE */}
           <div>
             <p className="px-3 text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-2">
-              Finance
+              Financial Audit
             </p>
             <nav className="space-y-1">
               <button
@@ -373,7 +573,7 @@ export const AdminReportsManagement: React.FC = () => {
                 onClick={() => setActiveMenu('Transactions')}
                 className={`w-full flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
                   activeMenu === 'Transactions'
-                    ? 'bg-blue-50 text-blue-600'
+                    ? 'bg-blue-50 text-blue-600 font-semibold'
                     : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
                 }`}
               >
@@ -386,7 +586,7 @@ export const AdminReportsManagement: React.FC = () => {
                 onClick={() => setActiveMenu('Settlements')}
                 className={`w-full flex items-center justify-between px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
                   activeMenu === 'Settlements'
-                    ? 'bg-blue-50 text-blue-600'
+                    ? 'bg-blue-50 text-blue-600 font-semibold'
                     : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
                 }`}
               >
@@ -404,18 +604,15 @@ export const AdminReportsManagement: React.FC = () => {
           {/* SYSTEM */}
           <div>
             <p className="px-3 text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-2">
-              System
+              System Administration
             </p>
             <nav className="space-y-1">
               <button
                 type="button"
-                onClick={() => {
-                  setActiveMenu('Reports')
-                  setActiveTab('reports')
-                }}
+                onClick={() => setActiveMenu('Reports')}
                 className={`w-full flex items-center gap-3 px-3 py-2 text-sm font-semibold rounded-lg transition-colors ${
-                  activeMenu === 'Reports' && activeTab === 'reports'
-                    ? 'bg-blue-50 text-blue-600'
+                  activeMenu === 'Reports'
+                    ? 'bg-blue-50 text-blue-600 font-semibold'
                     : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
                 }`}
               >
@@ -428,7 +625,7 @@ export const AdminReportsManagement: React.FC = () => {
                 onClick={() => setActiveMenu('Settings')}
                 className={`w-full flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
                   activeMenu === 'Settings'
-                    ? 'bg-blue-50 text-blue-600'
+                    ? 'bg-blue-50 text-blue-600 font-semibold'
                     : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
                 }`}
               >
@@ -439,68 +636,65 @@ export const AdminReportsManagement: React.FC = () => {
           </div>
         </div>
 
-        {/* User Card at Bottom */}
-        <div className="p-4 border-t border-slate-100 m-3 rounded-xl bg-slate-50 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-blue-600 text-white font-bold flex items-center justify-center text-sm shadow-sm shrink-0">
-            AD
-          </div>
-          <div className="min-w-0">
-            <p className="text-sm font-bold text-slate-900 truncate">System Admin</p>
-            <p className="text-xs text-slate-500 truncate">Administrator</p>
+        {/* Super Admin Status Card */}
+        <div className="p-4 border-t border-slate-100 m-3 rounded-xl bg-slate-50 flex items-center justify-between">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-9 h-9 rounded-full bg-blue-600 text-white font-bold flex items-center justify-center text-xs shadow-sm shrink-0">
+              AD
+            </div>
+            <div className="min-w-0">
+              <p className="text-xs font-bold text-slate-900 truncate">TapRide Admin</p>
+              <p className="text-[10px] text-emerald-600 font-semibold flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                Full System Power
+              </p>
+            </div>
           </div>
         </div>
       </aside>
 
       {/* MAIN CONTENT AREA */}
-      <div className="flex-1 flex flex-col min-w-0">
-        {/* TOP NAVBAR */}
-        <header className="h-16 bg-white border-b border-slate-200 px-8 flex items-center justify-between sticky top-0 z-20">
-          <div>
-            <h2 className="text-lg font-bold text-slate-900">TapRide - User & Operator Management</h2>
-            <p className="text-xs text-slate-500">Generate, view, and export operational and financial reports</p>
+      <div className="flex-1 flex flex-col min-w-0 min-h-screen">
+        {/* TOP NAVBAR - 100% Matching Wireframe Figure C.18 */}
+        <header className="h-16 bg-white border-b border-slate-200 px-8 flex items-center justify-between sticky top-0 z-20 shrink-0">
+          <div className="min-w-0 pr-4">
+            <h2 className="text-base font-bold text-slate-900 leading-tight">
+              {activeMenu === 'Reports' || activeMenu === 'Dashboard'
+                ? 'TapRide - User & Operator Management'
+                : `TapRide - ${activeMenu}`}
+            </h2>
+            <p className="text-xs text-slate-400 font-normal">
+              {activeMenu === 'Reports' || activeMenu === 'Dashboard'
+                ? 'Generate, view, and export operational and financial reports'
+                : `TapRide Central Authority Control Center • Route 81 Corridor`}
+            </p>
           </div>
 
-          <div className="flex items-center gap-4">
-            {/* View Switcher Tabs */}
-            <div className="flex items-center bg-slate-100 p-1 rounded-lg border border-slate-200">
-              <button
-                type="button"
-                onClick={() => setActiveTab('reports')}
-                className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-all ${
-                  activeTab === 'reports'
-                    ? 'bg-white text-blue-600 shadow-sm'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                Reports & Analytics
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab('approvals')}
-                className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-all flex items-center gap-1.5 ${
-                  activeTab === 'approvals'
-                    ? 'bg-white text-blue-600 shadow-sm'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <span>Pending Approvals</span>
-                {pendingApprovalsCount > 0 && (
-                  <span className="w-4 h-4 bg-rose-500 text-white rounded-full text-[10px] flex items-center justify-center font-bold">
-                    {pendingApprovalsCount}
-                  </span>
-                )}
-              </button>
-            </div>
+          <div className="flex items-center gap-4 shrink-0">
+            {/* Live Data Incoming Indicator */}
+            <button
+              type="button"
+              onClick={() => setLiveStreamEnabled(!liveStreamEnabled)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
+                liveStreamEnabled
+                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                  : 'bg-slate-100 text-slate-500 border-slate-200'
+              }`}
+              title="Click to toggle live telemetry updates"
+            >
+              <span className={`w-2 h-2 rounded-full ${liveStreamEnabled ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
+              <span>{liveStreamEnabled ? 'Live Stream Active' : 'Live Stream Paused'}</span>
+            </button>
 
             {/* Search Input */}
             <div className="relative">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
-                placeholder="Search..."
+                placeholder="Search anything..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-9 pr-4 py-1.5 w-60 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 focus:bg-white transition-colors"
+                className="pl-9 pr-4 py-1.5 w-52 text-xs bg-slate-50/80 border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 focus:bg-white transition-colors"
               />
             </div>
 
@@ -508,7 +702,8 @@ export const AdminReportsManagement: React.FC = () => {
             <button
               type="button"
               onClick={() => setShowNotifications(!showNotifications)}
-              className="relative p-2 text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors border border-slate-200"
+              className="relative p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-lg transition-colors border border-slate-200"
+              title="System Alerts & Incident Queue"
             >
               <Bell className="w-4 h-4" />
               <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-rose-500 rounded-full" />
@@ -516,26 +711,27 @@ export const AdminReportsManagement: React.FC = () => {
           </div>
         </header>
 
-        {/* FEEDBACK BANNER */}
-        {generationFeedback && (
-          <div className="mx-8 mt-6 p-4 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center justify-between text-emerald-800 text-sm animate-fade-in">
-            <div className="flex items-center gap-2">
-              <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
-              <span className="font-medium">{generationFeedback}</span>
+        {/* ADMIN ACTION FEEDBACK BANNER */}
+        {adminFeedback && (
+          <div className="mx-8 mt-6 p-4 bg-blue-50 border border-blue-200 rounded-xl flex items-center justify-between text-blue-900 text-sm shadow-xs animate-fade-in">
+            <div className="flex items-center gap-2.5">
+              <ShieldAlert className="w-5 h-5 text-blue-600 shrink-0" />
+              <span className="font-semibold text-xs">{adminFeedback}</span>
             </div>
             <button
               type="button"
-              onClick={() => setGenerationFeedback(null)}
-              className="text-emerald-600 hover:text-emerald-800"
+              onClick={() => setAdminFeedback(null)}
+              className="text-blue-500 hover:text-blue-700"
             >
               <X className="w-4 h-4" />
             </button>
           </div>
         )}
 
-        {/* SCROLLABLE BODY */}
+        {/* SCROLLABLE BODY BASED ON ACTIVE MENU */}
         <main className="p-8 space-y-6 flex-1 overflow-y-auto">
-          {activeTab === 'reports' ? (
+          {/* 1. REPORTS & DASHBOARD VIEW (FIGURE C.18 WIREFRAME) */}
+          {(activeMenu === 'Reports' || activeMenu === 'Dashboard') && (
             <>
               {/* PAGE SUBHEADER */}
               <div>
@@ -545,9 +741,9 @@ export const AdminReportsManagement: React.FC = () => {
 
               {/* REPORT GENERATION FILTER BAR */}
               <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+                <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
                   {/* REPORT TYPE */}
-                  <div>
+                  <div className="md:col-span-4">
                     <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">
                       Report Type
                     </label>
@@ -568,7 +764,7 @@ export const AdminReportsManagement: React.FC = () => {
                   </div>
 
                   {/* DATE RANGE */}
-                  <div>
+                  <div className="md:col-span-3">
                     <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">
                       Date Range
                     </label>
@@ -581,7 +777,7 @@ export const AdminReportsManagement: React.FC = () => {
                   </div>
 
                   {/* FORMAT */}
-                  <div>
+                  <div className="md:col-span-2">
                     <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">
                       Format
                     </label>
@@ -600,12 +796,12 @@ export const AdminReportsManagement: React.FC = () => {
                   </div>
 
                   {/* ACTION BUTTON */}
-                  <div>
+                  <div className="md:col-span-3">
                     <button
                       type="button"
                       disabled={isGenerating}
                       onClick={handleGenerateReport}
-                      className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold py-2 px-4 rounded-lg text-sm shadow-sm transition-colors flex items-center justify-center gap-2"
+                      className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold py-2 px-4 rounded-lg text-sm shadow-sm transition-colors flex items-center justify-center gap-2 whitespace-nowrap"
                     >
                       {isGenerating ? (
                         <>
@@ -620,16 +816,20 @@ export const AdminReportsManagement: React.FC = () => {
                 </div>
               </div>
 
-              {/* 4 SUMMARY METRIC CARDS */}
+              {/* 4 SUMMARY METRIC CARDS - LIVE REAL-TIME DATA */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
                 {/* Total Revenue */}
                 <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
-                  <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-                    Total Revenue
+                  <div className="flex items-center justify-between">
+                    <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                      Total Revenue
+                    </p>
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" title="Live stream active" />
+                  </div>
+                  <p className="text-3xl font-extrabold text-slate-900 tracking-tight font-mono">
+                    Rs. {(totalRevenue / 1000000).toFixed(2)}M
                   </p>
-                  <p className="text-3xl font-extrabold text-slate-900 tracking-tight">
-                    Rs. 38.7M
-                  </p>
+                  <p className="text-[11px] text-slate-400 font-medium mt-1">Live settled Route 81 fare sum</p>
                 </div>
 
                 {/* Transactions */}
@@ -637,9 +837,10 @@ export const AdminReportsManagement: React.FC = () => {
                   <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">
                     Transactions
                   </p>
-                  <p className="text-3xl font-extrabold text-slate-900 tracking-tight">
-                    284,921
+                  <p className="text-3xl font-extrabold text-slate-900 tracking-tight font-mono">
+                    {totalTransactions.toLocaleString()}
                   </p>
+                  <p className="text-[11px] text-emerald-600 font-medium mt-1">+1 every few seconds</p>
                 </div>
 
                 {/* Avg Fare */}
@@ -647,9 +848,10 @@ export const AdminReportsManagement: React.FC = () => {
                   <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">
                     Avg. Fare
                   </p>
-                  <p className="text-3xl font-extrabold text-slate-900 tracking-tight">
-                    Rs. 184
+                  <p className="text-3xl font-extrabold text-slate-900 tracking-tight font-mono">
+                    Rs. {(totalRevenue / totalTransactions).toFixed(0)}
                   </p>
+                  <p className="text-[11px] text-slate-400 font-medium mt-1">NCP provincial weighted avg</p>
                 </div>
 
                 {/* Success Rate */}
@@ -657,9 +859,10 @@ export const AdminReportsManagement: React.FC = () => {
                   <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">
                     Success Rate
                   </p>
-                  <p className="text-3xl font-extrabold text-slate-900 tracking-tight">
+                  <p className="text-3xl font-extrabold text-slate-900 tracking-tight font-mono">
                     99.2%
                   </p>
+                  <p className="text-[11px] text-emerald-600 font-medium mt-1">Instant offline/sync parity</p>
                 </div>
               </div>
 
@@ -699,10 +902,11 @@ export const AdminReportsManagement: React.FC = () => {
                         className="w-full h-full pb-4 overflow-visible"
                         viewBox="0 0 500 200"
                         preserveAspectRatio="none"
+                        style={{ width: '100%', height: '100%' }}
                       >
                         <defs>
                           <linearGradient id="revenueGradient" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stopColor="#2563eb" stopOpacity="0.15" />
+                            <stop offset="0%" stopColor="#2563eb" stopOpacity="0.25" />
                             <stop offset="100%" stopColor="#2563eb" stopOpacity="0.0" />
                           </linearGradient>
                         </defs>
@@ -716,17 +920,18 @@ export const AdminReportsManagement: React.FC = () => {
                           d="M 0 145 Q 60 135, 110 148 T 200 110 T 290 138 T 370 85 T 440 100 T 500 65"
                           fill="none"
                           stroke="#2563eb"
-                          strokeWidth="3"
+                          strokeWidth="3.5"
                           strokeLinecap="round"
+                          strokeLinejoin="round"
                         />
                         {/* Data Points */}
-                        <circle cx="0" cy="145" r="3" fill="#2563eb" />
-                        <circle cx="110" cy="148" r="3" fill="#2563eb" />
-                        <circle cx="200" cy="110" r="3" fill="#2563eb" />
-                        <circle cx="290" cy="138" r="3" fill="#2563eb" />
-                        <circle cx="370" cy="85" r="3" fill="#2563eb" />
-                        <circle cx="440" cy="100" r="3" fill="#2563eb" />
-                        <circle cx="500" cy="65" r="3" fill="#2563eb" />
+                        <circle cx="0" cy="145" r="4.5" fill="#2563eb" stroke="#ffffff" strokeWidth="2" />
+                        <circle cx="110" cy="148" r="4.5" fill="#2563eb" stroke="#ffffff" strokeWidth="2" />
+                        <circle cx="200" cy="110" r="4.5" fill="#2563eb" stroke="#ffffff" strokeWidth="2" />
+                        <circle cx="290" cy="138" r="4.5" fill="#2563eb" stroke="#ffffff" strokeWidth="2" />
+                        <circle cx="370" cy="85" r="4.5" fill="#2563eb" stroke="#ffffff" strokeWidth="2" />
+                        <circle cx="440" cy="100" r="4.5" fill="#2563eb" stroke="#ffffff" strokeWidth="2" />
+                        <circle cx="500" cy="65" r="4.5" fill="#2563eb" stroke="#ffffff" strokeWidth="2" />
                       </svg>
                     </div>
                   </div>
@@ -780,8 +985,9 @@ export const AdminReportsManagement: React.FC = () => {
                 id="report-activity-table"
                 className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden"
               >
-                <div className="p-6 border-b border-slate-100">
+                <div className="p-6 border-b border-slate-100 flex items-center justify-between">
                   <h4 className="font-bold text-slate-900 text-base">Report Activity</h4>
+                  <span className="text-xs text-slate-400">Official TapRide Authority Audit Trail</span>
                 </div>
 
                 <div className="overflow-x-auto">
@@ -851,145 +1057,274 @@ export const AdminReportsManagement: React.FC = () => {
                 </div>
               </div>
             </>
-          ) : (
-            /* OPERATOR & CONDUCTOR APPROVAL MANAGEMENT TAB */
+          )}
+
+          {/* 2. LIVE OPERATIONS VIEW - ADMIN POWER TO RE-ROUTE OR SUSPEND VEHICLE */}
+          {activeMenu === 'Live Operations' && (
             <div className="space-y-6">
-              <div>
-                <h3 className="text-xl font-bold text-slate-900">User & Operator Approval Queue</h3>
-                <p className="text-sm text-slate-500">
-                  Review and verify bus owner permits, conductor licenses, and operator registrations for North Central Province (Route 81).
-                </p>
-              </div>
-
-              {/* Approval Summary Cards */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-                <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
-                  <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-                    Pending Verification
-                  </p>
-                  <p className="text-2xl font-extrabold text-amber-600">
-                    {approvals.filter((a) => a.status === 'PENDING').length} Operators
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-xl font-bold text-slate-900">TapRide Central Fleet Control</h3>
+                  <p className="text-sm text-slate-500">
+                    Live operational surveillance across Route 81 (Anuradhapura ↔ Polonnaruwa).
                   </p>
                 </div>
-                <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
-                  <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-                    Approved Operators
-                  </p>
-                  <p className="text-2xl font-extrabold text-emerald-600">
-                    {approvals.filter((a) => a.status === 'APPROVED').length + 42} Active
-                  </p>
-                </div>
-                <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
-                  <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-                    Depot Jurisdiction
-                  </p>
-                  <p className="text-base font-bold text-slate-800">
-                    Anuradhapura & Polonnaruwa
-                  </p>
+                <div className="flex items-center gap-3">
+                  <span className="px-3 py-1 bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-bold rounded-full flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                    GPS Live Telemetry
+                  </span>
                 </div>
               </div>
 
-              {/* Approvals Table */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div className="bg-white p-5 border border-slate-200 rounded-xl shadow-sm">
+                  <p className="text-xs text-slate-400 font-bold uppercase">Active Buses</p>
+                  <p className="text-2xl font-black text-slate-900 mt-1 font-mono">{liveBuses.filter((b) => b.status === 'ON ROUTE').length} On Route</p>
+                </div>
+                <div className="bg-white p-5 border border-slate-200 rounded-xl shadow-sm">
+                  <p className="text-xs text-slate-400 font-bold uppercase">Live Passengers</p>
+                  <p className="text-2xl font-black text-blue-600 mt-1 font-mono">
+                    {liveBuses.reduce((acc, b) => acc + b.passengers, 0)} riders
+                  </p>
+                </div>
+                <div className="bg-white p-5 border border-slate-200 rounded-xl shadow-sm">
+                  <p className="text-xs text-slate-400 font-bold uppercase">Emergency Status</p>
+                  <p className="text-2xl font-black text-emerald-600 mt-1 font-mono">NORMAL</p>
+                </div>
+                <div className="bg-white p-5 border border-slate-200 rounded-xl shadow-sm">
+                  <p className="text-xs text-slate-400 font-bold uppercase">Admin Command</p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const nextState = !emergencyLockdown
+                      setEmergencyLockdown(nextState)
+                      setAdminFeedback(`Admin command: Fleet emergency lockdown ${nextState ? 'ACTIVATED' : 'DEACTIVATED'}.`)
+                      setTimeout(() => setAdminFeedback(null), 4000)
+                    }}
+                    className={`mt-1 text-xs font-bold px-3 py-1.5 rounded-lg transition-colors ${
+                      emergencyLockdown ? 'bg-rose-600 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                    }`}
+                  >
+                    {emergencyLockdown ? 'Lockdown Active' : 'Trigger Corridor Hold'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Active Bus Telemetry Table with Admin Suspend Power */}
               <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
-                <div className="p-6 border-b border-slate-100 flex items-center justify-between">
-                  <h4 className="font-bold text-slate-900 text-base">Pending Applications</h4>
-                  <span className="text-xs text-slate-500">NCP Transport Authority Authority Verification</span>
+                <div className="p-5 border-b border-slate-100 flex items-center justify-between">
+                  <h4 className="font-bold text-slate-900">Live Vehicle Fleet Telemetry</h4>
+                  <span className="text-xs text-slate-400">Admin can suspend any bus instantly</span>
+                </div>
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 text-xs font-bold uppercase">
+                    <tr>
+                      <th className="py-3 px-6">Vehicle Plate</th>
+                      <th className="py-3 px-6">Assigned Crew</th>
+                      <th className="py-3 px-6">Live Location</th>
+                      <th className="py-3 px-6">Speed</th>
+                      <th className="py-3 px-6">Load</th>
+                      <th className="py-3 px-6">Status</th>
+                      <th className="py-3 px-6 text-right">Admin Power</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {liveBuses.map((bus) => (
+                      <tr key={bus.plate} className="hover:bg-slate-50/60">
+                        <td className="py-4 px-6 font-mono font-bold text-slate-900">{bus.plate}</td>
+                        <td className="py-4 px-6 text-slate-700">{bus.driver} • {bus.conductor}</td>
+                        <td className="py-4 px-6 text-blue-600 font-medium flex items-center gap-1.5">
+                          <MapPin className="w-3.5 h-3.5" />
+                          {bus.currentHalt}
+                        </td>
+                        <td className="py-4 px-6 font-mono">{bus.speed}</td>
+                        <td className="py-4 px-6">{bus.passengers} pax</td>
+                        <td className="py-4 px-6">
+                          <span className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-bold ${
+                            bus.status === 'ON ROUTE'
+                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                              : bus.status === 'SUSPENDED'
+                              ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                              : 'bg-amber-50 text-amber-700 border border-amber-200'
+                          }`}>
+                            {bus.status}
+                          </span>
+                        </td>
+                        <td className="py-4 px-6 text-right">
+                          <button
+                            type="button"
+                            onClick={() => promptToggleBusStatus(bus)}
+                            className={`px-3 py-1 rounded text-xs font-bold transition-colors ${
+                              bus.status === 'SUSPENDED'
+                                ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                                : 'bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200'
+                            }`}
+                          >
+                            {bus.status === 'SUSPENDED' ? 'Reinstate Bus' : 'Suspend Vehicle'}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* 3. PASSENGERS VIEW - ADMIN POWER TO SUSPEND OR ACTIVATE RIDERS */}
+          {activeMenu === 'Passengers' && (
+            <div className="space-y-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-xl font-bold text-slate-900">Passenger Account Administration</h3>
+                  <p className="text-sm text-slate-500">TapRide central authority controls over passenger ridership permits, security status, and account suspension.</p>
+                </div>
+                <span className="text-xs font-bold bg-blue-50 text-blue-700 px-3 py-1 rounded-full border border-blue-200">
+                  {passengers.filter((p) => p.status === 'ACTIVE').length} Active Riders
+                </span>
+              </div>
+
+              <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+                <div className="p-5 border-b border-slate-100 flex items-center justify-between">
+                  <h4 className="font-bold text-slate-900">Registered Riders (Route 81 Corridor)</h4>
+                  <span className="text-xs text-slate-400">Admin can suspend passenger accounts or view trip history (Wallets are strictly managed by banking gateway/passenger top-ups)</span>
+                </div>
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 text-xs font-bold uppercase">
+                    <tr>
+                      <th className="py-3 px-6">Passenger ID</th>
+                      <th className="py-3 px-6">Name</th>
+                      <th className="py-3 px-6">NIC / Phone</th>
+                      <th className="py-3 px-6">Wallet Balance</th>
+                      <th className="py-3 px-6">Trips</th>
+                      <th className="py-3 px-6">Status</th>
+                      <th className="py-3 px-6 text-right">Admin Powers</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {passengers.map((p) => (
+                      <tr key={p.id} className="hover:bg-slate-50/60">
+                        <td className="py-4 px-6 font-mono font-bold text-blue-600">{p.id}</td>
+                        <td className="py-4 px-6 font-semibold text-slate-900">{p.name}</td>
+                        <td className="py-4 px-6 text-slate-500 text-xs">
+                          <div>NIC: {p.nic}</div>
+                          <div>{p.phone}</div>
+                        </td>
+                        <td className="py-4 px-6 font-bold text-slate-900 font-mono">
+                          Rs. {p.balance.toFixed(2)}
+                        </td>
+                        <td className="py-4 px-6">{p.tripsTaken} rides</td>
+                        <td className="py-4 px-6">
+                          <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${
+                            p.status === 'ACTIVE'
+                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                              : 'bg-rose-50 text-rose-700 border border-rose-200'
+                          }`}>
+                            {p.status}
+                          </span>
+                        </td>
+                        <td className="py-4 px-6 text-right">
+                          <button
+                            type="button"
+                            onClick={() => promptTogglePassengerStatus(p)}
+                            className={`px-3 py-1 text-xs font-bold rounded-md transition-colors ${
+                              p.status === 'ACTIVE'
+                                ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200'
+                                : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                            }`}
+                          >
+                            {p.status === 'ACTIVE' ? 'Suspend Account' : 'Activate Account'}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* 4. BUS OWNERS & CONDUCTORS (CENTRAL ADMIN APPROVAL & SUSPENSION) */}
+          {(activeMenu === 'Bus Owners' || activeMenu === 'Conductors' || activeMenu === 'Fleet Management') && (
+            <div className="space-y-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-xl font-bold text-slate-900">
+                    {activeMenu === 'Bus Owners' ? 'Bus Owner License & Operator Authority' : activeMenu === 'Conductors' ? 'Conductor Credential Management' : 'Fleet Registration & Operational Controls'}
+                  </h3>
+                  <p className="text-sm text-slate-500">
+                    Central authority power to grant permits, inspect vehicle compliance, or suspend non-compliant operators.
+                  </p>
+                </div>
+                <span className="text-xs bg-blue-50 text-blue-700 border border-blue-200 px-3 py-1 rounded-full font-bold">
+                  {operators.filter((o) => o.status === 'SUSPENDED').length} Suspended Operators
+                </span>
+              </div>
+
+              {/* Table of Operator Approvals & Suspensions */}
+              <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+                <div className="p-5 border-b border-slate-100 flex items-center justify-between">
+                  <h4 className="font-bold text-slate-900">Registered Transport Operators</h4>
+                  <span className="text-xs text-slate-500">TapRide NCP Authority Jurisdiction</span>
                 </div>
 
                 <div className="overflow-x-auto">
                   <table className="w-full text-left border-collapse">
                     <thead>
-                      <tr className="border-b border-slate-200 bg-slate-50/75">
-                        <th className="py-3 px-6 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                          Applicant
-                        </th>
-                        <th className="py-3 px-6 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                          Role
-                        </th>
-                        <th className="py-3 px-6 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                          Reg / Vehicle No.
-                        </th>
-                        <th className="py-3 px-6 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                          Depot & Route
-                        </th>
-                        <th className="py-3 px-6 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                          Status
-                        </th>
-                        <th className="py-3 px-6 text-[11px] font-bold text-slate-400 uppercase tracking-wider text-right">
-                          Actions
-                        </th>
+                      <tr className="border-b border-slate-200 bg-slate-50 text-xs font-bold text-slate-400 uppercase">
+                        <th className="py-3 px-6">Operator Name</th>
+                        <th className="py-3 px-6">Role</th>
+                        <th className="py-3 px-6">Reg / Vehicle No.</th>
+                        <th className="py-3 px-6">Assigned Corridor</th>
+                        <th className="py-3 px-6">Authority Status</th>
+                        <th className="py-3 px-6 text-right">Admin Powers</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-sm">
-                      {approvals.map((app) => (
-                        <tr key={app.id} className="hover:bg-slate-50/60 transition-colors">
+                      {operators
+                        .filter((op) => activeMenu === 'Fleet Management' || (activeMenu === 'Bus Owners' ? op.role !== 'Conductor' : op.role === 'Conductor'))
+                        .map((op) => (
+                        <tr key={op.id} className="hover:bg-slate-50/60">
                           <td className="py-4 px-6">
-                            <p className="font-semibold text-slate-900">{app.name}</p>
-                            <p className="text-xs text-slate-400">NIC: {app.nic}</p>
+                            <p className="font-semibold text-slate-900">{op.name}</p>
+                            <p className="text-xs text-slate-400">NIC: {op.nic}</p>
                           </td>
                           <td className="py-4 px-6">
                             <span className="inline-block bg-slate-100 text-slate-700 text-xs font-semibold px-2.5 py-1 rounded-md">
-                              {app.role}
+                              {op.role}
                             </span>
                           </td>
                           <td className="py-4 px-6 font-mono font-medium text-slate-800">
-                            {app.regNumber}
+                            {op.regNumber}
                           </td>
                           <td className="py-4 px-6 text-slate-600">
-                            <p className="text-xs font-semibold">{app.depot}</p>
-                            <p className="text-[11px] text-slate-400">{app.route}</p>
+                            <p className="text-xs font-semibold">{op.depot}</p>
+                            <p className="text-[11px] text-slate-400">{op.route}</p>
                           </td>
                           <td className="py-4 px-6">
-                            {app.status === 'PENDING' && (
-                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200">
-                                PENDING
-                              </span>
-                            )}
-                            {app.status === 'APPROVED' && (
-                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                APPROVED
-                              </span>
-                            )}
-                            {app.status === 'REJECTED' && (
-                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200">
-                                REJECTED
-                              </span>
-                            )}
+                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${
+                              op.status === 'ACTIVE'
+                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                : op.status === 'SUSPENDED'
+                                ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                                : 'bg-amber-50 text-amber-700 border border-amber-200'
+                            }`}>
+                              {op.status}
+                            </span>
                           </td>
-                          <td className="py-4 px-6 text-right space-x-2">
-                            {app.status === 'PENDING' ? (
-                              <>
-                                <button
-                                  type="button"
-                                  onClick={() => handleApprovalAction(app.id, 'APPROVED')}
-                                  className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-md transition-colors"
-                                >
-                                  Approve
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleApprovalAction(app.id, 'REJECTED')}
-                                  className="px-3 py-1 bg-slate-200 hover:bg-rose-100 hover:text-rose-700 text-slate-700 text-xs font-semibold rounded-md transition-colors"
-                                >
-                                  Reject
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setSelectedApproval(app)}
-                                  className="px-2.5 py-1 text-blue-600 hover:underline text-xs font-semibold"
-                                >
-                                  Review
-                                </button>
-                              </>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => setSelectedApproval(app)}
-                                className="text-blue-600 hover:underline text-xs font-semibold"
-                              >
-                                View Record
-                              </button>
-                            )}
+                          <td className="py-4 px-6 text-right">
+                            <button
+                              type="button"
+                              onClick={() => promptToggleOperatorStatus(op)}
+                              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors shadow-xs ${
+                                op.status === 'SUSPENDED'
+                                  ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                                  : 'bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200'
+                              }`}
+                            >
+                              {op.status === 'SUSPENDED' ? 'Reinstate Operator' : 'Suspend Operator'}
+                            </button>
                           </td>
                         </tr>
                       ))}
@@ -999,14 +1334,274 @@ export const AdminReportsManagement: React.FC = () => {
               </div>
             </div>
           )}
+
+          {/* 5. ROUTES & FARES VIEW - ADMIN CAN EDIT STAGE FARES */}
+          {activeMenu === 'Routes & Fares' && (
+            <div className="space-y-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-xl font-bold text-slate-900">Route 81 Corridor Tariff Schedule</h3>
+                  <p className="text-sm text-slate-500">North Central Province gazetted stages. Admin can adjust stage base fares live.</p>
+                </div>
+                <span className="bg-blue-50 text-blue-700 text-xs font-bold px-3 py-1 rounded-full border border-blue-200">
+                  Editable Tariff Table
+                </span>
+              </div>
+
+              <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 text-xs font-bold uppercase">
+                    <tr>
+                      <th className="py-3 px-6">Stage</th>
+                      <th className="py-3 px-6">Halt Name</th>
+                      <th className="py-3 px-6">Distance from Origin</th>
+                      <th className="py-3 px-6">Stage Fare (Rs.)</th>
+                      <th className="py-3 px-6 text-right">Admin Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {routeStages.map((st) => (
+                      <tr key={st.stage} className="hover:bg-slate-50/60">
+                        <td className="py-3.5 px-6 font-mono font-bold text-blue-600">Stage {st.stage}</td>
+                        <td className="py-3.5 px-6 font-bold text-slate-900">{st.name}</td>
+                        <td className="py-3.5 px-6 font-mono text-slate-500">{st.distance}</td>
+                        <td className="py-3.5 px-6 font-black text-emerald-600">Rs. {st.baseFare}</td>
+                        <td className="py-3.5 px-6 text-right">
+                          <button
+                            type="button"
+                            onClick={() => promptEditStageFare(st)}
+                            className="px-2.5 py-1 text-xs font-semibold bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-600 rounded transition-colors"
+                          >
+                            Edit Fare
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* 6. TRANSACTIONS VIEW - ADMIN AUDIT, DISPUTES & REFUND POWER */}
+          {activeMenu === 'Transactions' && (
+            <div className="space-y-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-xl font-bold text-slate-900">Financial Ledger & Disputed Charges</h3>
+                  <p className="text-sm text-slate-500">Full audit oversight. TapRide Admin can issue refunds or resolve fare disputes.</p>
+                </div>
+                <span className="text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-full">
+                  Real-time Settlement Parity
+                </span>
+              </div>
+
+              <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 text-xs font-bold uppercase">
+                    <tr>
+                      <th className="py-3 px-6">Transaction ID</th>
+                      <th className="py-3 px-6">Passenger</th>
+                      <th className="py-3 px-6">Vehicle</th>
+                      <th className="py-3 px-6">Segment</th>
+                      <th className="py-3 px-6">Fare Paid</th>
+                      <th className="py-3 px-6">Status</th>
+                      <th className="py-3 px-6 text-right">Admin Powers</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {transactions.map((tx) => (
+                      <tr key={tx.id} className="hover:bg-slate-50/60">
+                        <td className="py-3.5 px-6 font-mono font-bold text-blue-600">{tx.id}</td>
+                        <td className="py-3.5 px-6 font-semibold text-slate-900">{tx.passenger}</td>
+                        <td className="py-3.5 px-6 font-mono">{tx.vehicle}</td>
+                        <td className="py-3.5 px-6 text-slate-600">{tx.segment}</td>
+                        <td className="py-3.5 px-6 font-bold text-slate-900">Rs. {tx.fare.toFixed(2)}</td>
+                        <td className="py-3.5 px-6">
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
+                            tx.status === 'SETTLED'
+                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                              : tx.status === 'REFUNDED'
+                              ? 'bg-slate-100 text-slate-700'
+                              : 'bg-amber-50 text-amber-700 border border-amber-200'
+                          }`}>
+                            {tx.status}
+                          </span>
+                        </td>
+                        <td className="py-3.5 px-6 text-right space-x-2">
+                          {tx.status !== 'REFUNDED' && (
+                            <button
+                              type="button"
+                              onClick={() => promptTransactionAction(tx.id, 'REFUNDED', tx.fare)}
+                              className="px-2.5 py-1 text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded transition-colors"
+                            >
+                              Issue Refund
+                            </button>
+                          )}
+                          {tx.status === 'DISPUTED' && (
+                            <button
+                              type="button"
+                              onClick={() => promptTransactionAction(tx.id, 'SETTLED', tx.fare)}
+                              className="px-2.5 py-1 text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded transition-colors"
+                            >
+                              Dismiss Dispute
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* 7. SETTLEMENTS VIEW */}
+          {activeMenu === 'Settlements' && (
+            <div className="space-y-6">
+              <div>
+                <h3 className="text-xl font-bold text-slate-900">Operator Disbursements & Fee Management</h3>
+                <p className="text-sm text-slate-500">Weekly net revenue disbursement audit for North Central Province bus owners.</p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                <div className="bg-white p-5 border border-slate-200 rounded-xl shadow-sm">
+                  <p className="text-xs text-slate-400 font-bold uppercase">Pending Operator Payouts</p>
+                  <p className="text-3xl font-black text-slate-900 mt-1 font-mono">Rs. 298,740</p>
+                  <p className="text-xs text-emerald-600 font-semibold mt-1">Ready for Bank of Ceylon batch disbursement</p>
+                </div>
+                <div className="bg-white p-5 border border-slate-200 rounded-xl shadow-sm">
+                  <p className="text-xs text-slate-400 font-bold uppercase">TapRide {platformFee}% Platform Take</p>
+                  <p className="text-3xl font-black text-blue-600 mt-1 font-mono">Rs. 9,370</p>
+                  <p className="text-xs text-slate-400 mt-1">Central commission revenue</p>
+                </div>
+                <div className="bg-white p-5 border border-slate-200 rounded-xl shadow-sm">
+                  <p className="text-xs text-slate-400 font-bold uppercase">Settled Cycles (Month)</p>
+                  <p className="text-3xl font-black text-slate-800 mt-1 font-mono">4 Cycles</p>
+                  <p className="text-xs text-slate-500 mt-1">Total Rs. 1.18M paid to fleet operators</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 8. SETTINGS VIEW - TAPRIDE CENTRAL PARAMS */}
+          {activeMenu === 'Settings' && (
+            <div className="space-y-6 max-w-2xl">
+              <div>
+                <h3 className="text-xl font-bold text-slate-900">TapRide Central Platform Governance</h3>
+                <p className="text-sm text-slate-500">Adjust tariff parameters and central platform fees for Route 81.</p>
+              </div>
+
+              <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-5">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
+                    Provincial Fare Kilometer Tariff (Rs. / km)
+                  </label>
+                  <input
+                    type="number"
+                    value={provincialRate}
+                    onChange={(e) => setProvincialRate(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm font-semibold"
+                  />
+                  <p className="text-xs text-slate-400 mt-1">NCP Gazetted base rate per passenger km</p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
+                    TapRide Platform Service Commission (%)
+                  </label>
+                  <input
+                    type="number"
+                    value={platformFee}
+                    onChange={(e) => setPlatformFee(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-sm font-semibold"
+                  />
+                  <p className="text-xs text-slate-400 mt-1">Operator settlement deduction percentage</p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
+                    Jurisdiction Corridor
+                  </label>
+                  <input
+                    type="text"
+                    disabled
+                    value="North Central Province (Anuradhapura ↔ Polonnaruwa)"
+                    className="w-full bg-slate-100 border border-slate-200 rounded-lg p-2.5 text-sm font-semibold text-slate-600"
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAdminFeedback('Platform configuration saved. Live rates updated across all Route 81 terminals.')
+                    setTimeout(() => setAdminFeedback(null), 3500)
+                  }}
+                  className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl transition-colors shadow-sm"
+                >
+                  Save Configuration
+                </button>
+              </div>
+            </div>
+          )}
         </main>
 
         {/* FOOTER */}
-        <footer className="h-12 bg-white border-t border-slate-200 px-8 flex items-center justify-between text-xs text-slate-400">
-          <span>&copy; 2026 TapRide Admin Portal</span>
-          <span>All generated reports are logged for audit purposes.</span>
+        <footer className="h-12 bg-white border-t border-slate-200 px-8 flex items-center justify-between text-xs text-slate-400 shrink-0">
+          <span>&copy; 2026 TapRide Central Administrative Portal</span>
+          <span>All administrative overrides and suspensions are logged for audit purposes.</span>
         </footer>
       </div>
+
+      {/* CONFIRMATION DIALOG MODAL */}
+      {confirmDialog && confirmDialog.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs transition-opacity"
+            onClick={() => setConfirmDialog(null)}
+          />
+          <div className="relative bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 p-6 z-10 animate-scale-in">
+            <div className="flex items-start gap-4">
+              <div className={`p-3 rounded-full shrink-0 ${
+                confirmDialog.isDestructive ? 'bg-rose-100 text-rose-600' : 'bg-blue-100 text-blue-600'
+              }`}>
+                {confirmDialog.isDestructive ? (
+                  <AlertTriangle className="w-6 h-6" />
+                ) : (
+                  <ShieldAlert className="w-6 h-6" />
+                )}
+              </div>
+              <div className="flex-1">
+                <h4 className="text-base font-bold text-slate-900">{confirmDialog.title}</h4>
+                <p className="text-sm text-slate-600 mt-2 leading-relaxed">
+                  {confirmDialog.message}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-6 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setConfirmDialog(null)}
+                className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => confirmDialog.onConfirm()}
+                className={`px-4 py-2 text-xs font-bold text-white rounded-lg transition-colors shadow-sm cursor-pointer ${
+                  confirmDialog.isDestructive
+                    ? 'bg-rose-600 hover:bg-rose-700'
+                    : 'bg-blue-600 hover:bg-blue-700'
+                }`}
+              >
+                {confirmDialog.actionLabel}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* NOTIFICATIONS FLYOUT */}
       {showNotifications && (
@@ -1037,7 +1632,7 @@ export const AdminReportsManagement: React.FC = () => {
                   type="button"
                   onClick={() => {
                     setShowNotifications(false)
-                    setActiveTab('approvals')
+                    setActiveMenu('Bus Owners')
                   }}
                   className="mt-2 text-blue-600 font-bold hover:underline"
                 >
@@ -1051,97 +1646,6 @@ export const AdminReportsManagement: React.FC = () => {
                   Weekly Settlement Summary for Aug 23 - Aug 29 is ready for download.
                 </p>
               </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* APPLICATION REVIEW MODAL */}
-      {selectedApproval && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div
-            className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs"
-            onClick={() => setSelectedApproval(null)}
-          />
-          <div className="relative bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-100 z-10 space-y-5 animate-scale-up">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <div>
-                <h4 className="font-bold text-slate-900 text-lg">Application Details</h4>
-                <p className="text-xs text-slate-500">
-                  Application ID: {selectedApproval.id}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setSelectedApproval(null)}
-                className="text-slate-400 hover:text-slate-600"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="space-y-3 text-sm">
-              <div className="flex justify-between py-1 border-b border-slate-50">
-                <span className="text-slate-400 font-medium">Applicant Name</span>
-                <span className="font-bold text-slate-900">{selectedApproval.name}</span>
-              </div>
-              <div className="flex justify-between py-1 border-b border-slate-50">
-                <span className="text-slate-400 font-medium">Role Category</span>
-                <span className="font-semibold text-slate-800">{selectedApproval.role}</span>
-              </div>
-              <div className="flex justify-between py-1 border-b border-slate-50">
-                <span className="text-slate-400 font-medium">Vehicle / Reg ID</span>
-                <span className="font-mono font-bold text-blue-600">{selectedApproval.regNumber}</span>
-              </div>
-              <div className="flex justify-between py-1 border-b border-slate-50">
-                <span className="text-slate-400 font-medium">Assigned Depot</span>
-                <span className="font-medium text-slate-800">{selectedApproval.depot}</span>
-              </div>
-              <div className="flex justify-between py-1 border-b border-slate-50">
-                <span className="text-slate-400 font-medium">Route Corridor</span>
-                <span className="font-medium text-slate-800">{selectedApproval.route}</span>
-              </div>
-              <div className="flex justify-between py-1 border-b border-slate-50">
-                <span className="text-slate-400 font-medium">National ID (NIC)</span>
-                <span className="font-mono text-slate-700">{selectedApproval.nic}</span>
-              </div>
-              <div className="flex justify-between py-1 border-b border-slate-50">
-                <span className="text-slate-400 font-medium">Contact Phone</span>
-                <span className="text-slate-700">{selectedApproval.contact}</span>
-              </div>
-              <div className="flex justify-between py-1">
-                <span className="text-slate-400 font-medium">Status</span>
-                <span className="font-bold text-slate-900">{selectedApproval.status}</span>
-              </div>
-            </div>
-
-            <div className="pt-2 flex items-center justify-end gap-3">
-              {selectedApproval.status === 'PENDING' ? (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => handleApprovalAction(selectedApproval.id, 'REJECTED')}
-                    className="px-4 py-2 bg-slate-100 hover:bg-rose-50 hover:text-rose-700 text-slate-700 text-sm font-semibold rounded-lg transition-colors"
-                  >
-                    Reject Application
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleApprovalAction(selectedApproval.id, 'APPROVED')}
-                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg shadow-sm transition-colors"
-                  >
-                    Approve Operator
-                  </button>
-                </>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setSelectedApproval(null)}
-                  className="px-4 py-2 bg-slate-100 text-slate-700 text-sm font-semibold rounded-lg"
-                >
-                  Close
-                </button>
-              )}
             </div>
           </div>
         </div>
