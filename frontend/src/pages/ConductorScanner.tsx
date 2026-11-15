@@ -563,9 +563,16 @@ export const ConductorScanner: React.FC = () => {
             <ChevronLeft className="w-5 h-5" />
           </button>
 
-          <div className="text-center">
-            <h1 className="text-base font-bold text-slate-900 leading-tight">Conductor Scanner</h1>
-            <p className="text-[11px] text-slate-500 font-medium">TapRide Conductor • North Central</p>
+          <div className="flex items-center gap-2">
+            <img
+              src="/logo.jpeg"
+              alt="TapRide Logo"
+              className="w-7 h-7 rounded-lg object-contain border border-slate-100 shrink-0"
+            />
+            <div className="text-left">
+              <h1 className="text-sm font-bold text-slate-900 leading-tight">Conductor Scanner</h1>
+              <p className="text-[10px] text-slate-500 font-medium">TapRide • Route 81</p>
+            </div>
           </div>
 
           {/* Online/Offline Status Indicator */}
