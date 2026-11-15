@@ -21,7 +21,8 @@ import {
   Clock,
   MapPin,
   ArrowLeftRight,
-  Navigation
+  Navigation,
+  BookOpen
 } from 'lucide-react'
 
 // Standard Stage Halts on Route 81 (North Central Province: Anuradhapura - Polonnaruwa Corridor)
@@ -66,6 +67,8 @@ interface ScannedRecord {
   route: string
   fromStop?: string
   toStop?: string
+  isDuplicate?: boolean
+  originalScanTime?: string
 }
 
 export const ConductorScanner: React.FC = () => {
@@ -88,15 +91,16 @@ export const ConductorScanner: React.FC = () => {
   const [currentFare, setCurrentFare] = useState<number>(220)
 
   // Scanning & UI states
-  const [isScanning, setIsScanning] = useState<boolean>(false)
   const [scanSuccessAnim, setScanSuccessAnim] = useState<boolean>(false)
   const [scanFeedback, setScanFeedback] = useState<string | null>(null)
+  const [activeValidationResult, setActiveValidationResult] = useState<ScannedRecord | null>(null)
+  const isPausedRef = useRef<boolean>(false)
 
   // Modals
   const [showManualModal, setShowManualModal] = useState<boolean>(false)
   const [showHistoryModal, setShowHistoryModal] = useState<boolean>(false)
   const [showProfileModal, setShowProfileModal] = useState<boolean>(false)
-  const [showSampleQRModal, setShowSampleQRModal] = useState<boolean>(false)
+  const [showGuideModal, setShowGuideModal] = useState<boolean>(false)
 
   // Manual entry inputs
   const [manualPassengerId, setManualPassengerId] = useState<string>('')
@@ -192,6 +196,34 @@ export const ConductorScanner: React.FC = () => {
     }
   }
 
+  // Audio Synthesizer for Duplicate / Warning Alert
+  const playWarningBeep = () => {
+    try {
+      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+      if (!AudioCtx) return
+      const ctx = new AudioCtx()
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.type = 'sawtooth'
+      osc.frequency.setValueAtTime(320, ctx.currentTime) // Low buzzer tone
+      gain.gain.setValueAtTime(0.15, ctx.currentTime)
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25)
+      osc.connect(gain)
+      gain.connect(ctx.destination)
+      osc.start()
+      osc.stop(ctx.currentTime + 0.25)
+    } catch {
+      // Audio fallback
+    }
+  }
+
+  // Resume camera scanning for the next passenger
+  const handleScanNextPassenger = () => {
+    setActiveValidationResult(null)
+    isPausedRef.current = false
+    lastScannedTimeRef.current = Date.now()
+  }
+
   // Camera Activation via WebRTC MediaDevices
   const startCamera = async () => {
     setCameraError(null)
@@ -267,6 +299,12 @@ export const ConductorScanner: React.FC = () => {
     let isProcessing = false
 
     const scanFrame = async (timestamp: number) => {
+      // If validation result is active or paused, do not scan any frames (prevents looping)
+      if (isPausedRef.current) {
+        animationFrameId = requestAnimationFrame(scanFrame)
+        return
+      }
+
       const video = videoRef.current
       const canvas = canvasRef.current
 
@@ -356,12 +394,7 @@ export const ConductorScanner: React.FC = () => {
           }
 
           if (detectedContent) {
-            const now = Date.now()
-            // 2.5-second debounce between scans
-            if (now - lastScannedTimeRef.current > 2500) {
-              lastScannedTimeRef.current = now
-              handleProcessScan(detectedContent)
-            }
+            handleProcessScan(detectedContent)
           }
         } finally {
           isProcessing = false
@@ -381,10 +414,10 @@ export const ConductorScanner: React.FC = () => {
     }
   }, [])
 
-  // Process & Record Scanned Passenger
+  // Process & Record Scanned Passenger (One-at-a-time, Auto-Stop with Duplicate Prevention)
   const handleProcessScan = (rawContent?: string, fareOverride?: number) => {
-    if (isScanning) return
-    setIsScanning(true)
+    // Immediately pause scanning loop to prevent duplicate reads
+    isPausedRef.current = true
 
     // Parse identifier into clean TapRide Passenger format
     let passengerDisplay = `Passenger TR-${Math.floor(1000 + Math.random() * 9000)}`
@@ -422,7 +455,29 @@ export const ConductorScanner: React.FC = () => {
     const now = new Date()
     const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 
-    // Play feedback
+    // Check duplicate scan within current session to prevent multiple charges on the same passenger
+    const existingRecent = scanHistory.find(
+      (item) => item.passengerId.toLowerCase() === passengerDisplay.toLowerCase()
+    )
+
+    if (existingRecent) {
+      playWarningBeep()
+      const duplicateRecord: ScannedRecord = {
+        passengerId: passengerDisplay,
+        scanTime: timeStr,
+        fare: existingRecent.fare,
+        status: 'ALREADY CHARGED',
+        route: 'Route 81',
+        fromStop: existingRecent.fromStop,
+        toStop: existingRecent.toStop,
+        isDuplicate: true,
+        originalScanTime: existingRecent.scanTime
+      }
+      setActiveValidationResult(duplicateRecord)
+      return
+    }
+
+    // New valid boarding
     playValidationBeep()
     if ('vibrate' in navigator) {
       navigator.vibrate([70, 40, 70])
@@ -438,12 +493,13 @@ export const ConductorScanner: React.FC = () => {
       status: 'PAID',
       route: 'Route 81',
       fromStop: fromStop,
-      toStop: toStop
+      toStop: toStop,
+      isDuplicate: false
     }
 
     setScanHistory((prev) => [newRecord, ...prev])
+    setActiveValidationResult(newRecord)
     setScanFeedback(`Validated ${passengerDisplay} • ${fromStop} → ${toStop} • Fare Rs. ${fare.toFixed(2)} deducted.`)
-    setIsScanning(false)
 
     setTimeout(() => {
       setScanFeedback(null)
@@ -698,13 +754,23 @@ export const ConductorScanner: React.FC = () => {
             {/* Top Viewfinder Controls */}
             <div className="w-full flex items-center justify-between z-10">
               <span className="text-[10px] tracking-widest text-slate-300 uppercase font-semibold drop-shadow-sm flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
-                Live Camera Scanner
+                {activeValidationResult ? (
+                  <span className="flex items-center gap-1.5 text-emerald-400">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                    Validation Result
+                  </span>
+                ) : (
+                  <>
+                    <span className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
+                    Live Camera Scanner
+                  </>
+                )}
               </span>
 
               <div className="flex items-center gap-1.5">
-                {!cameraActive && (
+                {!cameraActive && !activeValidationResult && (
                   <button
+                    type="button"
                     onClick={startCamera}
                     className="text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium px-2 py-0.5 rounded-md flex items-center gap-1"
                   >
@@ -714,96 +780,157 @@ export const ConductorScanner: React.FC = () => {
                 )}
                 <button
                   type="button"
-                  onClick={() => setShowSampleQRModal(true)}
-                  className="text-[10px] bg-slate-800 hover:bg-slate-700 text-cyan-300 font-semibold px-2 py-1 rounded-lg border border-cyan-500/40 transition-colors shadow-sm"
-                  title="View standard TapRide passenger boarding QR"
+                  onClick={() => setShowGuideModal(true)}
+                  className="text-[10px] bg-slate-800 hover:bg-slate-700 text-cyan-300 font-semibold px-2.5 py-1 rounded-lg border border-cyan-500/40 transition-colors shadow-sm flex items-center gap-1"
+                  title="View Conductor Scanner Guide"
                 >
-                  Sample QR
-                </button>
-                <button
-                  onClick={() => handleProcessScan()}
-                  disabled={isScanning}
-                  className="text-[10px] bg-blue-600 hover:bg-blue-500 text-white font-semibold px-2.5 py-1 rounded-lg transition-colors shadow-sm"
-                >
-                  {isScanning ? 'Processing...' : 'Simulate Scan'}
+                  <BookOpen className="w-3 h-3 text-cyan-300" />
+                  <span>Guide</span>
                 </button>
               </div>
             </div>
 
-            {/* Target Scanning Frame */}
-            <div className="relative w-52 h-52 flex items-center justify-center my-auto z-10 overflow-hidden rounded-2xl">
-              {/* Corner brackets matching Figma design */}
-              <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-blue-400 rounded-tl-xl drop-shadow-[0_0_8px_rgba(96,165,250,0.8)] z-20 pointer-events-none" />
-              <div className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-blue-400 rounded-tr-xl drop-shadow-[0_0_8px_rgba(96,165,250,0.8)] z-20 pointer-events-none" />
-              <div className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 border-blue-400 rounded-bl-xl drop-shadow-[0_0_8px_rgba(96,165,250,0.8)] z-20 pointer-events-none" />
-              <div className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 border-blue-400 rounded-br-xl drop-shadow-[0_0_8px_rgba(96,165,250,0.8)] z-20 pointer-events-none" />
+            {/* Viewfinder Center Body: Scanned Result Card OR Live Scanning Viewfinder */}
+            {activeValidationResult ? (
+              <div className="w-full flex-1 flex flex-col items-center justify-center my-auto z-20 animate-fadeIn py-2 max-w-sm">
+                {activeValidationResult.isDuplicate ? (
+                  <div className="w-full bg-slate-900/95 border border-amber-500/50 rounded-2xl p-4 text-center space-y-2.5 shadow-2xl backdrop-blur-md">
+                    <div className="w-12 h-12 mx-auto rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/40 flex items-center justify-center">
+                      <AlertCircle className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-bold tracking-wider uppercase text-amber-400 bg-amber-950/80 px-2.5 py-0.5 rounded-full border border-amber-500/30">
+                        Duplicate Scan Blocked
+                      </span>
+                      <h3 className="text-base font-bold text-white mt-1.5">
+                        {activeValidationResult.passengerId}
+                      </h3>
+                      <p className="text-xs text-amber-200 mt-1">
+                        Already validated at {activeValidationResult.originalScanTime || activeValidationResult.scanTime}
+                      </p>
+                      <p className="text-[11px] text-slate-300 font-medium">
+                        Passenger was not charged again.
+                      </p>
+                    </div>
+                    <div className="text-[10px] text-slate-400 bg-slate-950/80 py-1.5 px-3 rounded-lg border border-slate-800 font-mono">
+                      Route 81 • {activeValidationResult.fromStop?.split(' ')[0]} → {activeValidationResult.toStop?.split(' ')[0]}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="w-full bg-slate-900/95 border border-emerald-500/50 rounded-2xl p-4 text-center space-y-2.5 shadow-2xl backdrop-blur-md">
+                    <div className="w-12 h-12 mx-auto rounded-full bg-emerald-500 text-white flex items-center justify-center shadow-lg">
+                      <Check className="w-7 h-7 stroke-[3]" />
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-bold tracking-wider uppercase text-emerald-300 bg-emerald-950/80 px-2.5 py-0.5 rounded-full border border-emerald-500/30">
+                        Fare Paid • Boarding Approved
+                      </span>
+                      <h3 className="text-base font-bold text-white mt-1">
+                        {activeValidationResult.passengerId}
+                      </h3>
+                      <div className="text-2xl font-black text-emerald-400 mt-0.5">
+                        Rs. {activeValidationResult.fare.toFixed(0)}
+                      </div>
+                    </div>
+                    <div className="text-xs text-slate-200 font-semibold bg-slate-950/80 py-1.5 px-3 rounded-lg border border-slate-800">
+                      <div className="text-blue-300 text-[11px]">
+                        {activeValidationResult.fromStop} → {activeValidationResult.toStop}
+                      </div>
+                      <div className="text-[10px] text-slate-400 font-normal mt-0.5">
+                        Time: {activeValidationResult.scanTime} • Route 81
+                      </div>
+                    </div>
+                  </div>
+                )}
 
-              {/* Viewfinder fallback icon when video is not granted */}
-              {!cameraActive && (
-                <div className="text-slate-700 flex flex-col items-center justify-center">
-                  <ScanLine className="w-20 h-20 opacity-30 text-slate-400" />
-                  {cameraError && (
-                    <span className="text-[10px] text-slate-400 mt-2 max-w-[170px] leading-tight">
-                      Camera preview ready. Tap "Simulate Scan" or allow browser camera permissions.
-                    </span>
+                {/* Scan Next Passenger Button */}
+                <button
+                  type="button"
+                  onClick={handleScanNextPassenger}
+                  className="w-full mt-3.5 py-3 px-4 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <ScanLine className="w-4 h-4" />
+                  <span>Scan Next Passenger</span>
+                </button>
+              </div>
+            ) : (
+              <>
+                {/* Target Scanning Frame */}
+                <div className="relative w-52 h-52 flex items-center justify-center my-auto z-10 overflow-hidden rounded-2xl">
+                  {/* Corner brackets matching Figma design */}
+                  <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-blue-400 rounded-tl-xl drop-shadow-[0_0_8px_rgba(96,165,250,0.8)] z-20 pointer-events-none" />
+                  <div className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-blue-400 rounded-tr-xl drop-shadow-[0_0_8px_rgba(96,165,250,0.8)] z-20 pointer-events-none" />
+                  <div className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 border-blue-400 rounded-bl-xl drop-shadow-[0_0_8px_rgba(96,165,250,0.8)] z-20 pointer-events-none" />
+                  <div className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 border-blue-400 rounded-br-xl drop-shadow-[0_0_8px_rgba(96,165,250,0.8)] z-20 pointer-events-none" />
+
+                  {/* Viewfinder fallback icon when video is not granted */}
+                  {!cameraActive && (
+                    <div className="text-slate-700 flex flex-col items-center justify-center">
+                      <ScanLine className="w-20 h-20 opacity-30 text-slate-400" />
+                      {cameraError && (
+                        <span className="text-[10px] text-slate-400 mt-2 max-w-[170px] leading-tight">
+                          Camera preview ready. Allow browser camera permissions or use Manual Entry.
+                        </span>
+                      )}
+                    </div>
                   )}
+
+                  {/* Laser Scanning Animation Bar - Moving Smoothly Up and Down */}
+                  <div
+                    className="absolute left-2 right-2 h-1 bg-cyan-400 rounded-full shadow-[0_0_15px_3px_#38bdf8] pointer-events-none z-30"
+                    style={{
+                      animation: 'laserScanUpDown 2.2s ease-in-out infinite'
+                    }}
+                  />
+                  <style>{`
+                    @keyframes laserScanUpDown {
+                      0% {
+                        top: 8px;
+                        opacity: 0.7;
+                      }
+                      50% {
+                        top: calc(100% - 12px);
+                        opacity: 1;
+                      }
+                      100% {
+                        top: 8px;
+                        opacity: 0.7;
+                      }
+                    }
+                  `}</style>
                 </div>
-              )}
 
-              {/* Laser Scanning Animation Bar - Moving Smoothly Up and Down */}
-              <div
-                className="absolute left-2 right-2 h-1 bg-cyan-400 rounded-full shadow-[0_0_15px_3px_#38bdf8] pointer-events-none z-30"
-                style={{
-                  animation: 'laserScanUpDown 2.2s ease-in-out infinite'
-                }}
-              />
-              <style>{`
-                @keyframes laserScanUpDown {
-                  0% {
-                    top: 8px;
-                    opacity: 0.7;
-                  }
-                  50% {
-                    top: calc(100% - 12px);
-                    opacity: 1;
-                  }
-                  100% {
-                    top: 8px;
-                    opacity: 0.7;
-                  }
-                }
-              `}</style>
-            </div>
+                {/* Frame Helper Text */}
+                <p className="text-xs text-slate-300 font-medium mb-3 z-10 drop-shadow-sm">
+                  Align the QR code inside the frame
+                </p>
 
-            {/* Frame Helper Text */}
-            <p className="text-xs text-slate-300 font-medium mb-3 z-10 drop-shadow-sm">
-              Align the QR code inside the frame
-            </p>
+                {/* Viewfinder Action Buttons: Flash & Manual Entry */}
+                <div className="flex items-center justify-center gap-3 w-full z-10">
+                  <button
+                    type="button"
+                    onClick={toggleFlash}
+                    className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 px-4 rounded-xl text-xs font-semibold transition-all border ${
+                      isFlashOn
+                        ? 'bg-amber-400 text-slate-950 border-amber-300 shadow-md'
+                        : 'bg-slate-800/90 hover:bg-slate-800 text-slate-200 border-slate-700'
+                    }`}
+                  >
+                    {isFlashOn ? <Zap className="w-4 h-4 fill-slate-950" /> : <ZapOff className="w-4 h-4" />}
+                    <span>{isFlashOn ? 'Flash On' : 'Flash'}</span>
+                  </button>
 
-            {/* Viewfinder Action Buttons: Flash & Manual Entry */}
-            <div className="flex items-center justify-center gap-3 w-full z-10">
-              <button
-                type="button"
-                onClick={toggleFlash}
-                className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 px-4 rounded-xl text-xs font-semibold transition-all border ${
-                  isFlashOn
-                    ? 'bg-amber-400 text-slate-950 border-amber-300 shadow-md'
-                    : 'bg-slate-800/90 hover:bg-slate-800 text-slate-200 border-slate-700'
-                }`}
-              >
-                {isFlashOn ? <Zap className="w-4 h-4 fill-slate-950" /> : <ZapOff className="w-4 h-4" />}
-                <span>{isFlashOn ? 'Flash On' : 'Flash'}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setShowManualModal(true)}
-                className="flex-1 flex items-center justify-center gap-1.5 py-2.5 px-4 rounded-xl text-xs font-semibold bg-white hover:bg-slate-100 text-slate-900 transition-colors shadow-sm"
-              >
-                <Keyboard className="w-4 h-4 text-slate-700" />
-                <span>Manual Entry</span>
-              </button>
-            </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowManualModal(true)}
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2.5 px-4 rounded-xl text-xs font-semibold bg-white hover:bg-slate-100 text-slate-900 transition-colors shadow-sm"
+                  >
+                    <Keyboard className="w-4 h-4 text-slate-700" />
+                    <span>Manual Entry</span>
+                  </button>
+                </div>
+              </>
+            )}
           </section>
 
           {/* Boarding Validation Guidance Banner */}
@@ -1054,63 +1181,107 @@ export const ConductorScanner: React.FC = () => {
           </div>
         )}
 
-        {/* Modal: View Official TapRide Sample Passenger QR */}
-        {showSampleQRModal && (
+        {/* Modal: Conductor Operational Guide */}
+        {showGuideModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-fadeIn">
-            <div className="w-full max-w-sm bg-white rounded-3xl p-5 shadow-2xl border border-slate-100 space-y-3.5 text-center">
+            <div className="w-full max-w-sm bg-white rounded-3xl p-5 shadow-2xl border border-slate-100 space-y-4 max-h-[90vh] overflow-y-auto">
               <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                 <div className="flex items-center gap-2">
                   <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
-                    <QrCode className="w-4 h-4" />
+                    <BookOpen className="w-4 h-4" />
                   </div>
-                  <h3 className="text-sm font-bold text-slate-900">Passenger Boarding QR</h3>
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900">Conductor Scanner Guide</h3>
+                    <div className="text-[10px] text-slate-500">Route 81 • North Central Province</div>
+                  </div>
                 </div>
                 <button
-                  onClick={() => setShowSampleQRModal(false)}
+                  onClick={() => setShowGuideModal(false)}
                   className="text-slate-400 hover:text-slate-600 p-1"
                 >
                   <X className="w-5 h-5" />
                 </button>
               </div>
 
-              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200/80 flex flex-col items-center">
-                <img
-                  src="/passenger-qr.png"
-                  alt="Standard Passenger QR"
-                  className="w-44 h-44 bg-white p-2 rounded-xl shadow-xs border border-slate-200 object-contain"
-                />
-                <div className="text-xs font-bold text-slate-800 mt-2">Passenger TR-2048</div>
-                <div className="text-[10px] text-slate-500 font-mono">Payload: TR-2048|BUS-NC4521|FARE-NCP</div>
-              </div>
-
-              <div className="bg-blue-50 p-3 rounded-xl text-[11px] text-blue-900 leading-relaxed text-left space-y-1">
-                <div className="font-bold flex items-center gap-1 text-blue-950">
-                  <Info className="w-3.5 h-3.5 text-blue-600" />
-                  How to test camera scanning:
+              <div className="space-y-3 text-xs text-slate-700">
+                <div className="bg-slate-50 border border-slate-200/70 p-3 rounded-2xl space-y-1">
+                  <div className="font-bold text-slate-900 flex items-center gap-2">
+                    <span className="w-5 h-5 rounded-full bg-blue-600 text-white text-[10px] flex items-center justify-center font-bold">1</span>
+                    Set Journey Stage & Fare
+                  </div>
+                  <p className="text-[11px] text-slate-600 leading-relaxed pl-7">
+                    Select current boarding stop (From) and destination (To) along Route 81 (Anuradhapura ↔ Polonnaruwa). The fare updates automatically from Rs. 30 to Rs. 220.
+                  </p>
                 </div>
-                <div>1. Open <a href="/passenger-qr.png" target="_blank" rel="noreferrer" className="underline font-bold text-blue-700">/passenger-qr.png</a> on your phone screen.</div>
-                <div>2. Point the phone towards the laptop webcam to verify live scanning.</div>
+
+                <div className="bg-slate-50 border border-slate-200/70 p-3 rounded-2xl space-y-1">
+                  <div className="font-bold text-slate-900 flex items-center gap-2">
+                    <span className="w-5 h-5 rounded-full bg-blue-600 text-white text-[10px] flex items-center justify-center font-bold">2</span>
+                    Scan Passenger QR Code
+                  </div>
+                  <p className="text-[11px] text-slate-600 leading-relaxed pl-7">
+                    Hold passenger phone screen or card inside the corner brackets. The camera instantly validates boarding and deducts the fare.
+                  </p>
+                </div>
+
+                <div className="bg-emerald-50 border border-emerald-200/80 p-3 rounded-2xl space-y-1">
+                  <div className="font-bold text-emerald-950 flex items-center gap-2">
+                    <span className="w-5 h-5 rounded-full bg-emerald-600 text-white text-[10px] flex items-center justify-center font-bold">3</span>
+                    Auto-Stop Protection (No Double Charges)
+                  </div>
+                  <p className="text-[11px] text-emerald-800 leading-relaxed pl-7">
+                    Scanning automatically halts immediately on successful validation. Tap <strong>"Scan Next Passenger"</strong> to resume for the next commuter.
+                  </p>
+                </div>
+
+                <div className="bg-slate-50 border border-slate-200/70 p-3 rounded-2xl space-y-1">
+                  <div className="font-bold text-slate-900 flex items-center gap-2">
+                    <span className="w-5 h-5 rounded-full bg-blue-600 text-white text-[10px] flex items-center justify-center font-bold">4</span>
+                    Manual Entry Fallback
+                  </div>
+                  <p className="text-[11px] text-slate-600 leading-relaxed pl-7">
+                    If a commuter screen is unreadable or battery is low, tap <strong>"Manual Entry"</strong> to record boarding by Passenger TR number or NIC.
+                  </p>
+                </div>
               </div>
 
-              <div className="flex items-center gap-2 pt-1">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowSampleQRModal(false)
-                    handleProcessScan('TR-2048|BUS-NC4521|FARE-NCP')
-                  }}
-                  className="flex-1 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-colors shadow-sm"
-                >
-                  Validate This QR
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowSampleQRModal(false)}
-                  className="py-2 px-3 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors"
-                >
-                  Close
-                </button>
+              {/* Sample QR code reference collapsible/preview for training */}
+              <div className="border border-slate-200 rounded-2xl p-3 bg-slate-50/50 space-y-2">
+                <div className="text-[11px] font-bold text-slate-800 flex items-center justify-between">
+                  <span>Testing Reference (Sample QR)</span>
+                  <span className="text-[10px] font-normal text-blue-600">ISO 18004</span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <img
+                    src="/passenger-qr.png"
+                    alt="Passenger QR"
+                    className="w-14 h-14 bg-white p-1 rounded-lg border border-slate-200 object-contain shrink-0"
+                  />
+                  <div className="text-[10px] text-slate-500 leading-tight">
+                    Standard passenger boarding payload: <br />
+                    <code className="text-slate-700 font-mono text-[9px] bg-white px-1 py-0.5 rounded border border-slate-200 inline-block mt-0.5">
+                      TR-2048|BUS-NC4521|FARE-NCP
+                    </code>
+                    <br />
+                    <a
+                      href="/passenger-qr.png"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-blue-600 underline font-semibold mt-1 inline-block"
+                    >
+                      Open test QR in new tab
+                    </a>
+                  </div>
+                </div>
               </div>
+
+              <button
+                type="button"
+                onClick={() => setShowGuideModal(false)}
+                className="w-full py-2.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-colors shadow-sm"
+              >
+                Close Guide
+              </button>
             </div>
           </div>
         )}
