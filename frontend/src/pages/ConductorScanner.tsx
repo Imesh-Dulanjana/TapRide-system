@@ -21,8 +21,7 @@ import {
   Clock,
   MapPin,
   ArrowLeftRight,
-  Navigation,
-  Upload
+  Navigation
 } from 'lucide-react'
 
 // Standard Stage Halts on Route 81 (North Central Province: Anuradhapura - Polonnaruwa Corridor)
@@ -98,7 +97,6 @@ export const ConductorScanner: React.FC = () => {
   const [showHistoryModal, setShowHistoryModal] = useState<boolean>(false)
   const [showProfileModal, setShowProfileModal] = useState<boolean>(false)
   const [showSampleQRModal, setShowSampleQRModal] = useState<boolean>(false)
-  const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   // Manual entry inputs
   const [manualPassengerId, setManualPassengerId] = useState<string>('')
@@ -438,40 +436,6 @@ export const ConductorScanner: React.FC = () => {
     setShowManualModal(false)
   }
 
-  // Handle Fallback Image Upload Scan
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-
-    const reader = new FileReader()
-    reader.onload = () => {
-      const img = new Image()
-      img.onload = () => {
-        const canvas = canvasRef.current
-        if (canvas) {
-          canvas.width = img.width
-          canvas.height = img.height
-          const ctx = canvas.getContext('2d')
-          if (ctx) {
-            ctx.drawImage(img, 0, 0)
-            const imgData = ctx.getImageData(0, 0, img.width, img.height)
-            const code = jsQR(imgData.data, img.width, img.height, {
-              inversionAttempts: 'attemptBoth'
-            })
-            if (code && code.data) {
-              handleProcessScan(code.data)
-            } else {
-              setScanFeedback('Uploaded image did not contain a recognizable standard QR code.')
-            }
-          }
-        }
-      }
-      img.src = reader.result as string
-    }
-    reader.readAsDataURL(file)
-    e.target.value = ''
-  }
-
   return (
     <div className="min-h-screen bg-slate-100 flex justify-center py-0 sm:py-6 select-none font-sans">
       <div className="w-full max-w-md bg-white sm:rounded-3xl shadow-xl overflow-hidden flex flex-col min-h-screen sm:min-h-[844px] relative border border-slate-200">
@@ -791,12 +755,12 @@ export const ConductorScanner: React.FC = () => {
               Align the QR code inside the frame
             </p>
 
-            {/* Viewfinder Action Buttons: Flash, Manual Entry, and Upload File */}
-            <div className="flex items-center justify-center gap-2 w-full z-10">
+            {/* Viewfinder Action Buttons: Flash & Manual Entry */}
+            <div className="flex items-center justify-center gap-3 w-full z-10">
               <button
                 type="button"
                 onClick={toggleFlash}
-                className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-semibold transition-all border ${
+                className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 px-4 rounded-xl text-xs font-semibold transition-all border ${
                   isFlashOn
                     ? 'bg-amber-400 text-slate-950 border-amber-300 shadow-md'
                     : 'bg-slate-800/90 hover:bg-slate-800 text-slate-200 border-slate-700'
@@ -809,29 +773,11 @@ export const ConductorScanner: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setShowManualModal(true)}
-                className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-semibold bg-white hover:bg-slate-100 text-slate-900 transition-colors shadow-sm"
+                className="flex-1 flex items-center justify-center gap-1.5 py-2.5 px-4 rounded-xl text-xs font-semibold bg-white hover:bg-slate-100 text-slate-900 transition-colors shadow-sm"
               >
                 <Keyboard className="w-4 h-4 text-slate-700" />
-                <span>Manual</span>
+                <span>Manual Entry</span>
               </button>
-
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-semibold bg-slate-800/90 hover:bg-slate-800 text-cyan-300 border border-cyan-500/30 transition-colors shadow-sm"
-                title="Upload a QR image file directly"
-              >
-                <Upload className="w-4 h-4 text-cyan-400" />
-                <span>Upload</span>
-              </button>
-
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                onChange={handleFileUpload}
-                className="hidden"
-              />
             </div>
           </section>
 
