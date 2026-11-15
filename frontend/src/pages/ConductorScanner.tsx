@@ -116,7 +116,9 @@ export const ConductorScanner: React.FC = () => {
         video: {
           facingMode: { ideal: 'environment' },
           width: { ideal: 1280 },
-          height: { ideal: 720 }
+          height: { ideal: 720 },
+          // @ts-expect-error focusMode is supported on Android & some webcams
+          focusMode: { ideal: 'continuous' }
         },
         audio: false
       })
@@ -163,7 +165,7 @@ export const ConductorScanner: React.FC = () => {
     }
   }
 
-  // Real-Time Frame Processing with jsQR
+  // Real-Time Frame Processing with Hybrid BarcodeDetector + jsQR (Anti-Glare & Multi-Pass)
   useEffect(() => {
     startCamera()
 
@@ -174,62 +176,107 @@ export const ConductorScanner: React.FC = () => {
 
     let animationFrameId: number
     let lastProcessedTime = 0
+    let isProcessing = false
 
-    const scanFrame = (timestamp: number) => {
+    const scanFrame = async (timestamp: number) => {
       const video = videoRef.current
       const canvas = canvasRef.current
 
-      // Process at most once every 90ms for optimal accuracy and zero CPU lag
+      // Process at most once every 75ms for high responsiveness with zero CPU lag
       if (
+        !isProcessing &&
         video &&
         video.readyState === video.HAVE_ENOUGH_DATA &&
         canvas &&
-        timestamp - lastProcessedTime > 90
+        timestamp - lastProcessedTime > 75
       ) {
+        isProcessing = true
         lastProcessedTime = timestamp
-        const ctx = canvas.getContext('2d', { willReadFrequently: true })
 
-        if (ctx) {
-          const vw = video.videoWidth
-          const vh = video.videoHeight
+        try {
+          let detectedContent: string | null = null
 
-          // 1. First priority: Scan the center crop directly inside the viewfinder frame
-          const cropDim = Math.floor(Math.min(vw, vh) * 0.72)
-          const cropX = Math.floor((vw - cropDim) / 2)
-          const cropY = Math.floor((vh - cropDim) / 2)
-
-          canvas.width = 480
-          canvas.height = 480
-          ctx.drawImage(video, cropX, cropY, cropDim, cropDim, 0, 0, 480, 480)
-
-          let imageData = ctx.getImageData(0, 0, 480, 480)
-          let code = jsQR(imageData.data, 480, 480, {
-            inversionAttempts: 'attemptBoth'
-          })
-
-          // 2. Fallback: If not found in center crop, scan the whole frame downscaled
-          if (!code) {
-            const scale = Math.min(1, 540 / Math.max(vw, vh))
-            const fw = Math.floor(vw * scale)
-            const fh = Math.floor(vh * scale)
-            canvas.width = fw
-            canvas.height = fh
-            ctx.drawImage(video, 0, 0, fw, fh)
-
-            imageData = ctx.getImageData(0, 0, fw, fh)
-            code = jsQR(imageData.data, fw, fh, {
-              inversionAttempts: 'attemptBoth'
-            })
+          // Pass 0: Native browser BarcodeDetector API (hardware-accelerated ML scanner)
+          if (typeof window !== 'undefined' && 'BarcodeDetector' in window) {
+            try {
+              const barcodeDetector = new (window as unknown as {
+                BarcodeDetector: new (opt: { formats: string[] }) => {
+                  detect: (source: HTMLVideoElement) => Promise<Array<{ rawValue?: string }>>
+                }
+              }).BarcodeDetector({ formats: ['qr_code'] })
+              const barcodes = await barcodeDetector.detect(video)
+              if (barcodes && barcodes.length > 0 && barcodes[0].rawValue) {
+                detectedContent = barcodes[0].rawValue
+              }
+            } catch {
+              // Fallback to jsQR
+            }
           }
 
-          if (code && code.data) {
+          // Pass 1 & 2: High-speed jsQR on canvas
+          if (!detectedContent) {
+            const ctx = canvas.getContext('2d', { willReadFrequently: true })
+            if (ctx) {
+              const vw = video.videoWidth
+              const vh = video.videoHeight
+
+              const cropDim = Math.floor(Math.min(vw, vh) * 0.75)
+              const cropX = Math.floor((vw - cropDim) / 2)
+              const cropY = Math.floor((vh - cropDim) / 2)
+
+              canvas.width = cropDim
+              canvas.height = cropDim
+
+              // 1. Native 1:1 sensor crop (sharpest resolution, no scaling blur)
+              ctx.filter = 'none'
+              ctx.drawImage(video, cropX, cropY, cropDim, cropDim, 0, 0, cropDim, cropDim)
+              let imgData = ctx.getImageData(0, 0, cropDim, cropDim)
+              let code = jsQR(imgData.data, cropDim, cropDim, {
+                inversionAttempts: 'attemptBoth'
+              })
+
+              // 2. Anti-glare contrast boost (cuts through phone screen backlight & reflections)
+              if (!code) {
+                ctx.filter = 'contrast(160%) brightness(88%)'
+                ctx.drawImage(video, cropX, cropY, cropDim, cropDim, 0, 0, cropDim, cropDim)
+                imgData = ctx.getImageData(0, 0, cropDim, cropDim)
+                code = jsQR(imgData.data, cropDim, cropDim, {
+                  inversionAttempts: 'attemptBoth'
+                })
+              }
+
+              // 3. Wide full-frame fallback
+              if (!code) {
+                const maxDim = 800
+                const scale = Math.min(1, maxDim / Math.max(vw, vh))
+                const fw = Math.floor(vw * scale)
+                const fh = Math.floor(vh * scale)
+                canvas.width = fw
+                canvas.height = fh
+                ctx.filter = 'none'
+                ctx.drawImage(video, 0, 0, fw, fh)
+                imgData = ctx.getImageData(0, 0, fw, fh)
+                code = jsQR(imgData.data, fw, fh, {
+                  inversionAttempts: 'attemptBoth'
+                })
+              }
+
+              if (code && code.data) {
+                detectedContent = code.data
+              }
+            }
+          }
+
+          if (detectedContent) {
             const now = Date.now()
             // 2.5-second debounce between scans
             if (now - lastScannedTimeRef.current > 2500) {
               lastScannedTimeRef.current = now
-              handleProcessScan(code.data)
+              handleProcessScan(detectedContent)
             }
           }
+        } finally {
+          isProcessing = false
         }
       }
 
