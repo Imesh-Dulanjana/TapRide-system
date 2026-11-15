@@ -18,8 +18,45 @@ import {
   Check,
   AlertCircle,
   RefreshCw,
-  Clock
+  Clock,
+  MapPin,
+  ArrowLeftRight,
+  Navigation
 } from 'lucide-react'
+
+// Standard Stage Halts on Route 138 (Colombo - Kaduwela / Homagama corridor)
+const ROUTE_138_STOPS = [
+  'Pettah (Fort)',
+  'Maradana / Tech',
+  'Borella',
+  'Rajagiriya',
+  'Battaramulla',
+  'Pelawatte',
+  'Thalahena',
+  'Malabe',
+  'Pittugala (SLIIT)',
+  'Kaduwela'
+]
+
+// Dynamic Distance/Stage-Based Fare Calculator (National Transport Commission Scale)
+const calculateFare = (from: string, to: string): number => {
+  const fromIdx = ROUTE_138_STOPS.indexOf(from)
+  const toIdx = ROUTE_138_STOPS.indexOf(to)
+  const stages = Math.abs(toIdx - fromIdx)
+  if (stages <= 0) return 30 // Minimum stop fare
+  const fareTable: { [key: number]: number } = {
+    1: 30,
+    2: 42,
+    3: 52,
+    4: 68,
+    5: 84,
+    6: 102,
+    7: 120,
+    8: 138,
+    9: 155
+  }
+  return fareTable[stages] || 30 + stages * 15
+}
 
 interface ScannedRecord {
   passengerId: string
@@ -27,6 +64,8 @@ interface ScannedRecord {
   fare: number
   status: string
   route: string
+  fromStop?: string
+  toStop?: string
 }
 
 export const ConductorScanner: React.FC = () => {
@@ -42,6 +81,12 @@ export const ConductorScanner: React.FC = () => {
   const [isFlashOn, setIsFlashOn] = useState<boolean>(false)
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine)
 
+  // Journey & Route Stage Selection
+  const [busDirection, setBusDirection] = useState<'Colombo → Kaduwela' | 'Kaduwela → Colombo'>('Colombo → Kaduwela')
+  const [fromStop, setFromStop] = useState<string>('Pettah (Fort)')
+  const [toStop, setToStop] = useState<string>('Malabe')
+  const [currentFare, setCurrentFare] = useState<number>(84)
+
   // Scanning & UI states
   const [isScanning, setIsScanning] = useState<boolean>(false)
   const [scanSuccessAnim, setScanSuccessAnim] = useState<boolean>(false)
@@ -54,7 +99,7 @@ export const ConductorScanner: React.FC = () => {
 
   // Manual entry inputs
   const [manualPassengerId, setManualPassengerId] = useState<string>('')
-  const [manualFare, setManualFare] = useState<string>('52.00')
+  const [manualFare, setManualFare] = useState<string>('84.00')
 
   // Scanned history list & last scan
   const [scanHistory, setScanHistory] = useState<ScannedRecord[]>([
@@ -63,25 +108,59 @@ export const ConductorScanner: React.FC = () => {
       scanTime: '11:10 AM',
       fare: 52,
       status: 'PAID',
-      route: 'Route 138'
+      route: 'Route 138',
+      fromStop: 'Borella',
+      toStop: 'Battaramulla'
     },
     {
       passengerId: 'Passenger TR-1992',
       scanTime: '10:54 AM',
-      fare: 68,
+      fare: 84,
       status: 'PAID',
-      route: 'Route 138'
+      route: 'Route 138',
+      fromStop: 'Pettah (Fort)',
+      toStop: 'Malabe'
     },
     {
       passengerId: 'Passenger TR-1874',
       scanTime: '10:21 AM',
-      fare: 52,
+      fare: 42,
       status: 'PAID',
-      route: 'Route 138'
+      route: 'Route 138',
+      fromStop: 'Maradana / Tech',
+      toStop: 'Borella'
     }
   ])
 
   const lastScan = scanHistory[0]
+
+  // Recalculate fare whenever From or To stops change
+  useEffect(() => {
+    const f = calculateFare(fromStop, toStop)
+    setCurrentFare(f)
+    setManualFare(f.toFixed(2))
+  }, [fromStop, toStop])
+
+  // Advance bus to next stop along the route
+  const handleAdvanceNextHalt = () => {
+    const currentIdx = ROUTE_138_STOPS.indexOf(fromStop)
+    if (busDirection === 'Colombo → Kaduwela') {
+      if (currentIdx < ROUTE_138_STOPS.length - 1) {
+        setFromStop(ROUTE_138_STOPS[currentIdx + 1])
+      }
+    } else {
+      if (currentIdx > 0) {
+        setFromStop(ROUTE_138_STOPS[currentIdx - 1])
+      }
+    }
+  }
+
+  // Swap From & To stops
+  const handleSwapStops = () => {
+    const oldFrom = fromStop
+    setFromStop(toStop)
+    setToStop(oldFrom)
+  }
 
   // Native Audio Synthesizer for Transit Validation Beep
   const playValidationBeep = () => {
@@ -313,7 +392,7 @@ export const ConductorScanner: React.FC = () => {
       }
     }
 
-    const fare = fareOverride !== undefined ? fareOverride : 52
+    const fare = fareOverride !== undefined ? fareOverride : currentFare
     const now = new Date()
     const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 
@@ -331,16 +410,18 @@ export const ConductorScanner: React.FC = () => {
       scanTime: timeStr,
       fare: fare,
       status: 'PAID',
-      route: 'Route 138'
+      route: 'Route 138',
+      fromStop: fromStop,
+      toStop: toStop
     }
 
     setScanHistory((prev) => [newRecord, ...prev])
-    setScanFeedback(`Validated ${passengerDisplay} • Fare Rs. ${fare.toFixed(2)} deducted.`)
+    setScanFeedback(`Validated ${passengerDisplay} • ${fromStop} → ${toStop} • Fare Rs. ${fare.toFixed(2)} deducted.`)
     setIsScanning(false)
 
     setTimeout(() => {
       setScanFeedback(null)
-    }, 4000)
+    }, 4500)
   }
 
   // Handle Manual Entry Modal Submit
@@ -348,7 +429,7 @@ export const ConductorScanner: React.FC = () => {
     e.preventDefault()
     if (!manualPassengerId.trim()) return
 
-    const parsedFare = parseFloat(manualFare) || 52
+    const parsedFare = parseFloat(manualFare) || currentFare
     handleProcessScan(manualPassengerId.trim(), parsedFare)
     setManualPassengerId('')
     setShowManualModal(false)
@@ -396,7 +477,7 @@ export const ConductorScanner: React.FC = () => {
         </header>
 
         {/* Scrollable Content Body */}
-        <main className="flex-1 px-5 py-4 overflow-y-auto pb-24 space-y-4">
+        <main className="flex-1 px-5 py-4 overflow-y-auto pb-24 space-y-3.5">
           
           {/* Validation Toast Message */}
           {scanFeedback && (
@@ -411,17 +492,35 @@ export const ConductorScanner: React.FC = () => {
             </div>
           )}
 
-          {/* Assigned Bus Details Card */}
-          <section className="bg-slate-50 rounded-2xl p-3.5 border border-slate-100 flex items-center justify-between">
+          {/* Assigned Bus Details Card with Direction Toggle */}
+          <section className="bg-slate-50 rounded-2xl p-3 border border-slate-200/80 flex items-center justify-between shadow-xs">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 border border-blue-100 flex items-center justify-center">
+              <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 border border-blue-100 flex items-center justify-center shrink-0">
                 <Bus className="w-5 h-5" />
               </div>
               <div>
                 <div className="text-sm font-bold text-slate-900">
                   NB-4521 <span className="text-slate-400 font-normal">•</span> Route 138
                 </div>
-                <div className="text-xs text-slate-500 font-medium">Colombo → Kaduwela</div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const newDir = busDirection === 'Colombo → Kaduwela' ? 'Kaduwela → Colombo' : 'Colombo → Kaduwela'
+                    setBusDirection(newDir)
+                    if (newDir === 'Kaduwela → Colombo') {
+                      setFromStop('Kaduwela')
+                      setToStop('Pettah (Fort)')
+                    } else {
+                      setFromStop('Pettah (Fort)')
+                      setToStop('Kaduwela')
+                    }
+                  }}
+                  className="text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1 mt-0.5"
+                  title="Click to toggle route direction"
+                >
+                  <span>{busDirection}</span>
+                  <ArrowLeftRight className="w-3 h-3 text-blue-500" />
+                </button>
               </div>
             </div>
             <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider">
@@ -429,11 +528,121 @@ export const ConductorScanner: React.FC = () => {
             </span>
           </section>
 
+          {/* Passenger Journey Stage & Dynamic Fare Selector */}
+          <section className="bg-gradient-to-br from-slate-900 via-blue-950 to-indigo-950 text-white rounded-2xl p-3.5 shadow-md space-y-2.5 border border-blue-900/60">
+            <div className="flex items-center justify-between border-b border-blue-800/50 pb-2">
+              <div className="flex items-center gap-1.5">
+                <Navigation className="w-3.5 h-3.5 text-cyan-400" />
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-200">
+                  Select Journey Stage
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] text-blue-300 font-medium bg-blue-900/80 px-2 py-0.5 rounded-full border border-blue-700/50">
+                  {Math.abs(ROUTE_138_STOPS.indexOf(toStop) - ROUTE_138_STOPS.indexOf(fromStop)) || 1} Stages
+                </span>
+                <span className="text-sm font-black text-cyan-300 bg-cyan-950/90 border border-cyan-400/50 px-2.5 py-0.5 rounded-lg shadow-sm">
+                  Rs. {currentFare.toFixed(0)}
+                </span>
+              </div>
+            </div>
+
+            {/* Boarding and Destination Selectors with Swap Button */}
+            <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+              {/* From Stop */}
+              <div className="space-y-1">
+                <label className="text-[9px] uppercase font-bold text-blue-300 tracking-wider flex items-center gap-1">
+                  <MapPin className="w-2.5 h-2.5 text-emerald-400" />
+                  From (Boarding)
+                </label>
+                <select
+                  value={fromStop}
+                  onChange={(e) => setFromStop(e.target.value)}
+                  className="w-full bg-slate-900/90 text-white border border-blue-700/60 rounded-xl px-2 py-1.5 text-xs font-semibold focus:outline-none focus:border-cyan-400 cursor-pointer"
+                >
+                  {ROUTE_138_STOPS.map((stop) => (
+                    <option key={stop} value={stop} className="bg-slate-900 text-white">
+                      {stop}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Swap Button */}
+              <div className="pt-3.5 flex flex-col items-center">
+                <button
+                  type="button"
+                  onClick={handleSwapStops}
+                  title="Swap Boarding and Destination"
+                  className="w-7 h-7 rounded-full bg-blue-800/80 hover:bg-blue-700 text-cyan-300 border border-blue-600/60 flex items-center justify-center transition-all hover:scale-105 active:scale-95 shadow-sm"
+                >
+                  <ArrowLeftRight className="w-3 h-3" />
+                </button>
+              </div>
+
+              {/* To Stop */}
+              <div className="space-y-1">
+                <label className="text-[9px] uppercase font-bold text-blue-300 tracking-wider flex items-center gap-1">
+                  <MapPin className="w-2.5 h-2.5 text-rose-400" />
+                  To (Destination)
+                </label>
+                <select
+                  value={toStop}
+                  onChange={(e) => setToStop(e.target.value)}
+                  className="w-full bg-slate-900/90 text-white border border-blue-700/60 rounded-xl px-2 py-1.5 text-xs font-semibold focus:outline-none focus:border-cyan-400 cursor-pointer"
+                >
+                  {ROUTE_138_STOPS.map((stop) => (
+                    <option key={stop} value={stop} className="bg-slate-900 text-white">
+                      {stop}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Quick Destination Stage Pills */}
+            <div className="pt-1.5 border-t border-blue-900/40">
+              <div className="flex items-center justify-between text-[10px] text-blue-300 mb-1">
+                <span className="font-semibold">Quick Stage Target:</span>
+                <button
+                  type="button"
+                  onClick={handleAdvanceNextHalt}
+                  className="text-cyan-300 hover:text-cyan-200 font-semibold underline underline-offset-2 flex items-center gap-0.5"
+                >
+                  Advance Bus Halt →
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {ROUTE_138_STOPS.filter((s) => s !== fromStop)
+                  .slice(0, 4)
+                  .map((stop) => {
+                    const f = calculateFare(fromStop, stop)
+                    const isSelected = toStop === stop
+                    return (
+                      <button
+                        key={stop}
+                        type="button"
+                        onClick={() => setToStop(stop)}
+                        className={`text-[10px] font-semibold px-2 py-0.5 rounded-lg border transition-all ${
+                          isSelected
+                            ? 'bg-cyan-500 text-slate-950 border-cyan-300 shadow-sm font-bold'
+                            : 'bg-blue-950/70 hover:bg-blue-800/80 text-blue-200 border-blue-800/60'
+                        }`}
+                      >
+                        {stop.split(' ')[0]} (Rs. {f})
+                      </button>
+                    )
+                  })}
+              </div>
+            </div>
+          </section>
+
           {/* Scanner Headline */}
-          <div className="text-center pt-1">
-            <h2 className="text-xl font-bold text-slate-900 tracking-tight">Scan Passenger QR</h2>
-            <p className="text-xs text-slate-500 mt-1 max-w-[280px] mx-auto leading-relaxed">
-              Scan the passenger's QR code to validate boarding and fare payment.
+          <div className="text-center pt-0.5">
+            <h2 className="text-lg font-bold text-slate-900 tracking-tight">Scan Passenger QR</h2>
+            <p className="text-xs text-slate-500 max-w-[300px] mx-auto leading-tight">
+              Charges <span className="font-bold text-slate-900">Rs. {currentFare.toFixed(0)}</span> for{' '}
+              <span className="text-blue-600 font-semibold">{fromStop.split(' ')[0]} → {toStop.split(' ')[0]}</span>
             </p>
           </div>
 
@@ -595,7 +804,10 @@ export const ConductorScanner: React.FC = () => {
                 </div>
                 <div>
                   <div className="text-sm font-bold text-slate-900">{lastScan.passengerId}</div>
-                  <div className="text-xs text-slate-500">
+                  <div className="text-xs text-blue-700 font-semibold">
+                    {lastScan.fromStop || 'Pettah (Fort)'} → {lastScan.toStop || 'Malabe'}
+                  </div>
+                  <div className="text-[10px] text-slate-400">
                     QR validated • {lastScan.scanTime}
                   </div>
                 </div>
@@ -632,6 +844,13 @@ export const ConductorScanner: React.FC = () => {
               </div>
 
               <form onSubmit={handleManualSubmit} className="space-y-3.5">
+                <div className="bg-blue-50 border border-blue-100 rounded-xl p-2.5 flex items-center justify-between text-xs">
+                  <span className="font-bold text-blue-950">Active Journey:</span>
+                  <span className="font-semibold text-blue-700">
+                    {fromStop.split(' ')[0]} → {toStop.split(' ')[0]}
+                  </span>
+                </div>
+
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
                     Passenger ID / NIC / Mobile
@@ -712,6 +931,9 @@ export const ConductorScanner: React.FC = () => {
                   >
                     <div>
                       <div className="text-xs font-bold text-slate-900">{item.passengerId}</div>
+                      <div className="text-[11px] font-semibold text-blue-700">
+                        {item.fromStop || 'Pettah (Fort)'} → {item.toStop || 'Malabe'}
+                      </div>
                       <div className="text-[10px] text-slate-500 flex items-center gap-1.5 mt-0.5">
                         <Clock className="w-3 h-3 text-slate-400" />
                         {item.scanTime} • {item.route}
