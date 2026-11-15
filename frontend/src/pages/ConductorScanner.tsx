@@ -133,7 +133,15 @@ export const ConductorScanner: React.FC = () => {
     }
   ])
 
-  const lastScan = scanHistory[0]
+  const lastScan = scanHistory[0] || {
+    passengerId: 'No recent scan',
+    scanTime: '--',
+    fare: currentFare,
+    status: 'STANDBY',
+    route: 'Route 81',
+    fromStop: fromStop,
+    toStop: toStop
+  }
 
   // Recalculate fare whenever From or To stops change
   useEffect(() => {
@@ -378,17 +386,34 @@ export const ConductorScanner: React.FC = () => {
     if (isScanning) return
     setIsScanning(true)
 
-    // Parse identifier
+    // Parse identifier into clean TapRide Passenger format
     let passengerDisplay = `Passenger TR-${Math.floor(1000 + Math.random() * 9000)}`
     if (rawContent) {
       try {
         const parsed = JSON.parse(rawContent)
-        if (parsed.passengerId) passengerDisplay = parsed.passengerId
+        if (parsed.passengerId) {
+          passengerDisplay = parsed.passengerId.startsWith('Passenger')
+            ? parsed.passengerId
+            : `Passenger ${parsed.passengerId}`
+        }
       } catch {
-        if (rawContent.includes('TR-') || rawContent.length < 25) {
-          passengerDisplay = rawContent.startsWith('TR-') ? `Passenger ${rawContent}` : rawContent
+        // Match standard TapRide passenger tokens (TR-XXXX or tr-xxxx)
+        const trMatch = rawContent.match(/TR-?\d+/i)
+        if (trMatch) {
+          passengerDisplay = `Passenger ${trMatch[0].toUpperCase()}`
+        } else if (/^\d{6,12}$/.test(rawContent.trim())) {
+          // NIC or Phone number
+          passengerDisplay = `Passenger ID ${rawContent.trim()}`
         } else {
-          passengerDisplay = `Passenger TR-${Math.floor(1000 + Math.random() * 9000)}`
+          // If non-standard external QR code (e.g. random web test QR codes)
+          // Derive a consistent numeric TapRide ID so raw foreign/random text is never shown
+          let hash = 0
+          for (let i = 0; i < rawContent.length; i++) {
+            hash = (hash << 5) - hash + rawContent.charCodeAt(i)
+            hash |= 0
+          }
+          const num = Math.abs(hash % 9000) + 1000
+          passengerDisplay = `Passenger TR-${num}`
         }
       }
     }
@@ -958,10 +983,17 @@ export const ConductorScanner: React.FC = () => {
                 ))}
               </div>
 
-              <div className="pt-2 border-t border-slate-100">
+              <div className="pt-2 border-t border-slate-100 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setScanHistory([])}
+                  className="py-2 px-3 text-xs font-semibold text-rose-600 hover:bg-rose-50 rounded-xl transition-colors"
+                >
+                  Clear History
+                </button>
                 <button
                   onClick={() => setShowHistoryModal(false)}
-                  className="w-full py-2 text-xs font-bold text-slate-700 hover:bg-slate-100 rounded-xl transition-colors"
+                  className="flex-1 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100 rounded-xl transition-colors"
                 >
                   Close
                 </button>
