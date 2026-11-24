@@ -1,6 +1,32 @@
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap');
 
 @import "tailwindcss";
+
+@keyframes scanLaserSweep {
+  0% {
+    top: 8px;
+    opacity: 0.8;
+  }
+  50% {
+    top: calc(100% - 12px);
+    opacity: 1;
+  }
+  100% {
+    top: 8px;
+    opacity: 0.8;
+  }
+}
+
+.animate-scan-laser-sweep {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  height: 2.5px;
+  background: #38bdf8;
+  box-shadow: 0 0 16px 4px rgba(56, 189, 248, 0.95), 0 0 4px 1px #ffffff;
+  border-radius: 9999px;
+  animation: scanLaserSweep 2.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
 :root {font-family:'DM Sans',sans-serif;color:#13213b;background:#fff;font-synthesis:none;text-rendering:optimizeLegibility;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;font-optical-sizing:auto;font-weight:400;scroll-behavior:smooth;--blue:#2156e8;--blue-dark:#1239b8;--ink:#14213d;--muted:#6e7a91;--line:#e4eaf3;--pale:#f5f8fd}
 * {box-sizing:border-box}
 html {scroll-behavior:smooth;scroll-padding-top:84px}
