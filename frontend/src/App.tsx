@@ -4,6 +4,7 @@ import LandingPage from './pages/LandingPage'
 import AuthPortal from './pages/AuthPortal'
 import PassengerQRBoarding from './pages/PassengerQRBoarding'
 import ConductorScanner from './pages/ConductorScanner'
+import SettlementSummary from './pages/SettlementSummary'
 import OfflineSync from './pages/OfflineSync'
 import ConductorPlaceholder from './pages/ConductorPlaceholder'
 
@@ -20,6 +21,8 @@ const App: React.FC = () => {
         <Route path="/conductor/sync" element={<OfflineSync />} />
         <Route path="/conductor/dashboard" element={<ConductorPlaceholder title="Dashboard" />} />
         <Route path="/conductor/profile" element={<ConductorPlaceholder title="Profile" />} />
+        <Route path="/owner/settlements" element={<SettlementSummary />} />
+        <Route path="/settlements" element={<SettlementSummary />} />
       </Routes>
     </Router>
   )
